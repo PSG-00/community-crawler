@@ -4,6 +4,7 @@ import time
 import math
 import urllib.request
 import urllib.parse
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from collections import Counter, defaultdict
 import networkx as nx
@@ -252,13 +253,11 @@ class TopicAnalyzer:
         # - 글 수가 10건 이상인 대형 떡밥
         # - 30분 쿨다운 및 일일 20회 미만 안전망 통과
         if (not is_backfill) and self.gemini_api_key and cluster["post_count"] >= 10 and can_call_gemini():
-            try:
-                ai_result = self._call_gemini_summary(time_range_str, kws, sample_titles)
-                if ai_result:
-                    record_gemini_call()
-                    return ai_result
-            except Exception as e:
-                log("LLM오류", f"Gemini 요약 실패: {e}")
+            ai_result = self._call_gemini_summary(time_range_str, kws, sample_titles)
+            if ai_result:
+                record_gemini_call()
+                log("LLM요약", f"✨ Gemini API 요약 완료 (오늘 사용량: {_daily_gemini_calls}/500 RPD)")
+                return ai_result
 
         # 2. 고품질 스마트 휴리스틱 요약기 (API 호출 0회, 비용 0원)
         title = f"'{top_k1}' · '{top_k2}' 관련 화제 집중" if top_k2 else f"'{top_k1}' 관련 게시글 급증"
@@ -301,11 +300,21 @@ class TopicAnalyzer:
         }).encode('utf-8')
 
         req = urllib.request.Request(url, data=req_data, headers={'Content-Type': 'application/json'}, method='POST')
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            text = data['candidates'][0]['content']['parts'][0]['text'].strip()
-            text = text.replace('```json', '').replace('```', '').strip()
-            return json.loads(text)
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                text = data['candidates'][0]['content']['parts'][0]['text'].strip()
+                text = text.replace('```json', '').replace('```', '').strip()
+                return json.loads(text)
+        except urllib.error.HTTPError as he:
+            if he.code == 429:
+                log("LLM한도", "⚠️ Gemini 429 Too Many Requests (RPD 500 일일 한도 초과). 즉시 내장 스마트 템플릿으로 자동 전환합니다.")
+            else:
+                log("LLM오류", f"Gemini HTTP 오류 ({he.code}): {he.reason}")
+            return None
+        except Exception as e:
+            log("LLM오류", f"Gemini 요약 예외: {e}")
+            return None
 
     def save_event(self, start_dt, end_dt, cluster_id, summary_info, cluster):
         """gallery_events 테이블에 저장 (5시간 병합 및 중복 도배 방지)"""

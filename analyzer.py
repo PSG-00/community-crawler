@@ -28,6 +28,7 @@ def get_default_groq_key():
 _last_gemini_call_time = 0.0
 _daily_gemini_calls = 0
 _last_call_date = None
+_last_groq_call_time = 0.0
 
 def can_call_gemini():
     """Gemini 무료 API 쿼터 안전망 (30분 쿨다운 & 하루 최대 20회 제한)"""
@@ -76,19 +77,25 @@ class TopicAnalyzer:
         return rows
 
     def extract_topics_with_groq(self, posts, start_dt, end_dt):
-        """Groq 120B를 통해 수많은 게시글을 한눈에 읽고 실제 화제 떡밥 직접 발굴"""
+        """Groq 120B를 통해 수많은 게시글을 한눈에 읽고 실제 화제 떡밥 직접 발굴 (TPM 8K / TPD 200K 안전 최적화)"""
+        global _last_groq_call_time
         if not self.groq_api_key or len(posts) < 10:
             return []
 
+        # Groq TPM(8,000) 방어를 위한 호출 간 최소 6초 간격 강제 보장
+        now = time.time()
+        elapsed = now - _last_groq_call_time
+        if elapsed < 6.0:
+            time.sleep(6.0 - elapsed)
+
         time_range_str = f"{start_dt.strftime('%m/%d %H:%M')} ~ {end_dt.strftime('%H:%M')}"
         
-        # 최대 90개 게시글 선정 (공백/본문 클렌징)
+        # 토큰 절약 최적화: 최대 35개 대표 글 선정 (제목 중심 + 핵심 본문 35자 내외 = ~700토큰 내 유지)
         post_samples = []
-        for pid, title, content, _ in posts[:90]:
+        for pid, title, content, _ in posts[:35]:
             clean_body = re.sub(r'\s+', ' ', content or '').strip()
-            if clean_body == '__EMPTY__':
-                clean_body = ''
-            post_samples.append(f"[{pid}] {title} / {clean_body[:100]}")
+            body_snip = f" ({clean_body[:35]})" if (clean_body and clean_body != '__EMPTY__') else ""
+            post_samples.append(f"[{pid}] {title}{body_snip}")
 
         posts_block = "\n".join(post_samples)
 
@@ -143,6 +150,7 @@ class TopicAnalyzer:
         req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
+                _last_groq_call_time = time.time()
                 data = json.loads(resp.read().decode('utf-8'))
                 raw_text = data["choices"][0]["message"]["content"].strip()
                 res_json = json.loads(raw_text)
@@ -151,7 +159,13 @@ class TopicAnalyzer:
                     log("Groq감지", f"⚡ Groq ({self.groq_model}) 떡밥 감지 완료 ({len(topics)}건 발견: {[t.get('title') for t in topics]})")
                 return topics
         except urllib.error.HTTPError as he:
-            log("Groq오류", f"Groq HTTP 에러 ({he.code}): {he.reason}")
+            if he.code == 429:
+                retry_after = he.headers.get("Retry-After")
+                wait_sec = int(retry_after) if (retry_after and retry_after.isdigit()) else 10
+                log("Groq한도", f"⚠️ Groq 429 Rate Limit 도달. {wait_sec}초 쿨다운 후 Gemini 대체 시도...")
+                time.sleep(min(wait_sec, 15))
+            else:
+                log("Groq오류", f"Groq HTTP 에러 ({he.code}): {he.reason}")
             return []
         except Exception as e:
             log("Groq오류", f"Groq 예외: {e}")
@@ -164,11 +178,10 @@ class TopicAnalyzer:
 
         time_range_str = f"{start_dt.strftime('%m/%d %H:%M')} ~ {end_dt.strftime('%H:%M')}"
         post_samples = []
-        for pid, title, content, _ in posts[:80]:
+        for pid, title, content, _ in posts[:35]:
             clean_body = re.sub(r'\s+', ' ', content or '').strip()
-            if clean_body == '__EMPTY__':
-                clean_body = ''
-            post_samples.append(f"[{pid}] {title} / {clean_body[:100]}")
+            body_snip = f" ({clean_body[:35]})" if (clean_body and clean_body != '__EMPTY__') else ""
+            post_samples.append(f"[{pid}] {title}{body_snip}")
 
         posts_block = "\n".join(post_samples)
         prompt = f"""당신은 디시인사이드 아이돌 갤러리의 전문 트렌드 분석가입니다.
@@ -410,7 +423,7 @@ class TopicAnalyzer:
                 total_created += len(events)
             except Exception as e:
                 log("재구축오류", f"{hours_back}h 전 구간 오류: {e}")
-            time.sleep(0.5)
+            time.sleep(6.0) # Groq TPM(8K) 한도 방어를 위한 안전 슬립
 
         # 현재 시각 기준 마지막 분석
         try:

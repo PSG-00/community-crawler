@@ -109,19 +109,22 @@ def index(
             cur.execute("SELECT COUNT(*) FROM dc_posts")
             db_total_posts = cur.fetchone()[0]
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "q": keyword,
-        "target": target,
-        "results": results,
-        "total_count": total_count,
-        "elapsed_ms": elapsed_ms,
-        "error_msg": error_msg,
-        "db_total_posts": db_total_posts,
-        "page": page,
-        "has_next": (offset + page_size) < total_count,
-        "has_prev": page > 1
-    })
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "q": keyword,
+            "target": target,
+            "results": results,
+            "total_count": total_count,
+            "elapsed_ms": elapsed_ms,
+            "error_msg": error_msg,
+            "db_total_posts": db_total_posts,
+            "page": page,
+            "has_next": (offset + page_size) < total_count,
+            "has_prev": page > 1
+        }
+    )
 
 @app.get("/api/stats")
 def stats():

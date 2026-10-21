@@ -1,4 +1,4 @@
-name: Deploy Community Crawler
+name: Deploy Community Crawler & Search Web
 
 on:
   push:
@@ -12,11 +12,71 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Run Deploy Verification
+      - name: Setup Virtualenv & Dependencies
         run: |
-          echo "=========================================="
-          echo "🚀 EC2에 코드가 성공적으로 자동 배포되었습니다!"
-          echo "서버 호스트: $(hostname)"
-          echo "현재 시간: $(date)"
-          python3 --version
-          echo "=========================================="
+          python3 -m venv venv
+          ./venv/bin/pip install --upgrade pip
+          ./venv/bin/pip install -r requirements.txt
+
+      - name: Initialize DB & Indexes
+        run: |
+          ./venv/bin/python3 database.py
+
+      - name: Register & Start Systemd Services
+        run: |
+          WORKDIR="$GITHUB_WORKSPACE"
+          VENV_PYTHON="$WORKDIR/venv/bin/python3"
+          VENV_UVICORN="$WORKDIR/venv/bin/uvicorn"
+
+          # 1. dc-crawler.service 생성
+          sudo bash -c "cat << 'EOF' > /etc/systemd/system/dc-crawler.service
+          [Unit]
+          Description=DC Inside Crawler Service
+          After=network.target postgresql.service
+
+          [Service]
+          User=ubuntu
+          WorkingDirectory=\$WORKDIR
+          ExecStart=\$VENV_PYTHON crawler.py
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF"
+          # 변수 치환
+          sudo sed -i "s|\\\$WORKDIR|$WORKDIR|g" /etc/systemd/system/dc-crawler.service
+          sudo sed -i "s|\\\$VENV_PYTHON|$VENV_PYTHON|g" /etc/systemd/system/dc-crawler.service
+
+          # 2. dc-web.service 생성
+          sudo bash -c "cat << 'EOF' > /etc/systemd/system/dc-web.service
+          [Unit]
+          Description=DC Inside Search Web Application
+          After=network.target postgresql.service
+
+          [Service]
+          User=ubuntu
+          WorkingDirectory=\$WORKDIR
+          ExecStart=\$VENV_UVICORN app:app --host 0.0.0.0 --port 80
+          Restart=always
+          RestartSec=5
+          AmbientCapabilities=CAP_NET_BIND_SERVICE
+          CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF"
+          # 변수 치환
+          sudo sed -i "s|\\\$WORKDIR|$WORKDIR|g" /etc/systemd/system/dc-web.service
+          sudo sed -i "s|\\\$VENV_UVICORN|$VENV_UVICORN|g" /etc/systemd/system/dc-web.service
+
+          # 3. 서비스 활성화 및 재시작
+          sudo systemctl daemon-reload
+          sudo systemctl enable dc-crawler.service dc-web.service
+          sudo systemctl restart dc-crawler.service dc-web.service
+
+      - name: Verify Service Status
+        run: |
+          sleep 3
+          sudo systemctl status dc-crawler.service --no-pager
+          sudo systemctl status dc-web.service --no-pager

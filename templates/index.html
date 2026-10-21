@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DC Community Search Engine</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-indigo-700 text-white shadow-md">
+        <div class="max-w-5xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-2">
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-bolt-lightning text-amber-300 text-2xl"></i>
+                <a href="/" class="text-xl font-bold tracking-tight">DC Inside FastSearch</a>
+                <span class="bg-indigo-800 text-indigo-200 text-xs px-2 py-0.5 rounded-full font-medium">RESCENE</span>
+            </div>
+            <div class="text-xs text-indigo-200">
+                현재 색인된 글: <strong class="text-white">{{ "{:,}".format(db_total_posts) }}</strong>건
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-5xl mx-auto px-4 py-8 flex-1 w-full">
+
+        <!-- Search Form -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 mb-6">
+            <form action="/" method="get" class="space-y-4">
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <!-- 대상 선택 -->
+                    <select name="target" class="bg-slate-100 border border-slate-300 text-slate-700 rounded-xl px-4 py-3 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="all" {% if target == 'all' %}selected{% endif %}>전체 (제목+본문)</option>
+                        <option value="title" {% if target == 'title' %}selected{% endif %}>제목만</option>
+                        <option value="content" {% if target == 'content' %}selected{% endif %}>본문만</option>
+                        <option value="nickname" {% if target == 'nickname' %}selected{% endif %}>닉네임</option>
+                        <option value="code" {% if target == 'code' %}selected{% endif %}>식별코드 (고닉ID/IP)</option>
+                    </select>
+
+                    <!-- 검색어 입력창 -->
+                    <div class="relative flex-1">
+                        <input type="text" name="q" value="{{ q }}" placeholder="검색할 단어를 입력하세요 (최소 2글자)" autofocus
+                               class="w-full bg-slate-100 border border-slate-300 text-slate-900 rounded-xl pl-4 pr-10 py-3 text-base focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        {% if q %}
+                        <a href="/" class="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
+                            <i class="fa-solid fa-circle-xmark"></i>
+                        </a>
+                        {% endif %}
+                    </div>
+
+                    <!-- 검색 버튼 -->
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl px-6 py-3 transition duration-150 flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <span>검색</span>
+                    </button>
+                </div>
+            </form>
+
+            {% if error_msg %}
+            <div class="mt-3 p-3 bg-red-50 text-red-700 rounded-xl text-sm flex items-center space-x-2 border border-red-200">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span>{{ error_msg }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Search Metadata -->
+        {% if q and not error_msg %}
+        <div class="flex justify-between items-center px-1 mb-4 text-sm text-slate-500">
+            <div>
+                <strong>"{{ q }}"</strong> 검색 결과 <span class="font-bold text-slate-800">{{ "{:,}".format(total_count) }}</span>건
+            </div>
+            <div class="flex items-center space-x-1 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full text-xs font-medium">
+                <i class="fa-solid fa-bolt text-emerald-500"></i>
+                <span>{{ elapsed_ms }} ms</span>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Results List -->
+        {% if results %}
+        <div class="space-y-3">
+            {% for item in results %}
+            <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 hover:border-indigo-400 transition shadow-xs">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <a href="{{ item.url }}" target="_blank" class="text-base sm:text-lg font-bold text-indigo-900 hover:text-indigo-600 hover:underline leading-snug">
+                        {{ item.title | safe }}
+                    </a>
+                    <span class="text-xs text-slate-400 shrink-0 mt-1">#{{ item.post_id }}</span>
+                </div>
+
+                {% if item.content_snippet %}
+                <p class="text-sm text-slate-600 leading-relaxed mb-3 line-clamp-2">
+                    {{ item.content_snippet | safe }}
+                </p>
+                {% endif %}
+
+                <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 gap-2">
+                    <div class="flex items-center space-x-2">
+                        <span class="font-medium text-slate-700">{{ item.nickname | safe }}</span>
+                        {% if item.author_code %}
+                        <span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">({{ item.author_code }})</span>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <i class="fa-regular fa-clock mr-1"></i>{{ item.created_at }}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex justify-center items-center space-x-4 mt-8 pb-8">
+            {% if has_prev %}
+            <a href="/?q={{ q }}&target={{ target }}&page={{ page - 1 }}" class="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50">
+                <i class="fa-solid fa-chevron-left mr-1"></i> 이전 페이지
+            </a>
+            {% endif %}
+
+            <span class="text-sm text-slate-500 font-medium">페이지 {{ page }}</span>
+
+            {% if has_next %}
+            <a href="/?q={{ q }}&target={{ target }}&page={{ page + 1 }}" class="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50">
+                다음 페이지 <i class="fa-solid fa-chevron-right ml-1"></i>
+            </a>
+            {% endif %}
+        </div>
+
+        {% elif q and not error_msg %}
+        <!-- No Results -->
+        <div class="text-center py-16 bg-white rounded-2xl border border-slate-200">
+            <i class="fa-regular fa-folder-open text-4xl text-slate-300 mb-3"></i>
+            <p class="text-slate-600 font-medium">일치하는 검색 결과가 없습니다.</p>
+            <p class="text-xs text-slate-400 mt-1">다른 검색어를 입력하시거나 조건을 변경해 보세요.</p>
+        </div>
+        {% elif not q %}
+        <!-- Initial Guidance -->
+        <div class="text-center py-16 bg-white rounded-2xl border border-slate-200">
+            <i class="fa-solid fa-magnifying-glass text-4xl text-indigo-200 mb-3"></i>
+            <h3 class="text-lg font-bold text-slate-700">디시인사이드 리센느 갤러리 고속 검색</h3>
+            <p class="text-sm text-slate-500 mt-1 max-w-md mx-auto">
+                두 글자 이상의 단어를 입력하면 PostgreSQL의 <strong class="text-indigo-600">pg_bigm</strong> 인덱스를 통해 10ms 이내로 칼같이 찾아냅니다.
+            </p>
+        </div>
+        {% endif %}
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
+        Powered by PostgreSQL 16 & pg_bigm on AWS EC2
+    </footer>
+
+</body>
+</html>

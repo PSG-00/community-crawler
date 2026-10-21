@@ -59,6 +59,7 @@ class TopicAnalyzer:
         self.groq_api_key = os.getenv("GROQ_API_KEY", get_default_groq_key()).strip()
         self.groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
         self.gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 
     def fetch_posts_between(self, start_dt, end_dt):
         """특정 기간의 게시글 (id, title, content) 조회"""
@@ -205,7 +206,7 @@ class TopicAnalyzer:
     }}
   ]
 }}"""
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.gemini_api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent?key={self.gemini_api_key}"
         req_data = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.2}
@@ -382,7 +383,7 @@ class TopicAnalyzer:
         if len(target_posts) < 10:
             return []
 
-        # 1. Groq 120B 직통 떡밥 감지 (실패 시 Gemini 2.5 Flash 대체)
+        # 1. Groq 120B 직통 떡밥 감지 (실패 시 Gemini 대체)
         raw_topics = self.extract_topics_with_groq(target_posts, start_dt, end_dt)
         if not raw_topics:
             raw_topics = self.extract_topics_with_gemini(target_posts, start_dt, end_dt)

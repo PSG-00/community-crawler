@@ -126,6 +126,9 @@ def merge_prefix_family(cands):
                 else:
                     keeper, other = short, long
                 cands[keeper]["post_ids"] |= cands[other]["post_ids"]
+                cands[keeper]["authors"] |= cands[other]["authors"]
+                for u, cnt in cands[other]["author_counts"].items():
+                    cands[keeper]["author_counts"][u] += cnt
                 cands[keeper]["variants"] |= cands[other]["variants"] | {other}
                 cands[keeper]["base_cnt"] = max(cands[keeper]["base_cnt"], cands[other]["base_cnt"])
                 absorbed.add(other)
@@ -180,27 +183,42 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
                           routine_days=None, min_posts=5, max_words=15):
     """
     1단계: 각 게시글의 단어 노트를 만들고 평소(24h) 대비 급상승한 단어 후보들을 추출
+    - 1인 꼬리말/서명/도배 완벽 차단:
+      1) 동일 작성자(author_code 또는 nickname)가 한 윈도우에서 같은 단어를 최대 2번까지만 인정(캡핑)
+      2) 최소 4명 이상의 서로 다른 작성자가 언급해야 하며, 특정 1인의 지분이 45%를 넘으면 제외
+      3) 제목에는 한 번도(또는 1번만) 안 나오고 본문(꼬리말/짤방 텍스트)에만 반복 등장하는 단어 제외
     """
     post_map = {}
     post_notes = {}
     target_word_posts = defaultdict(set)
+    target_word_title_hits = Counter()
     target_word_titles = defaultdict(list)
     target_word_authors = defaultdict(set)
+    target_word_author_counts = defaultdict(Counter)
 
     for p in target_posts:
         pid, title, content, created_at = p[0], p[1], p[2], p[3]
-        author = p[4] if len(p) > 4 else None
+        author = (p[4] or "").strip() if len(p) > 4 else ""
         if is_ritual_title(title):
             continue
         post_map[pid] = p
-        note = extract_words(title, content)
-        post_notes[pid] = note
+        title_note = extract_words(title, "")
+        full_note = extract_words(title, content)
+        post_notes[pid] = full_note
         t_clean = re.sub(r'\s+', '', title or '')
-        for w in note:
+
+        for w in full_note:
+            # 한 유저가 꼬리말/도배로 같은 단어를 11번 쓰더라도 작성자당 최대 2건까지만 카운트!
+            if author and not author.startswith("anon_"):
+                if target_word_author_counts[w][author] >= 2:
+                    continue
+                target_word_author_counts[w][author] += 1
+                target_word_authors[w].add(author)
+
             target_word_posts[w].add(pid)
             target_word_titles[w].append(t_clean)
-            if author:
-                target_word_authors[w].add(author)
+            if w in title_note:
+                target_word_title_hits[w] += 1
 
     base_df = Counter()
     for p in baseline_posts:
@@ -217,15 +235,25 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
         df = len(pids)
         if df < max(3, min_posts - 1):
             continue
+        # 제목에는 거의 안 나오고 본문(개인 꼬리말/서명)에서만 카운트된 단어 차단
+        if target_word_title_hits[w] < 2 and (target_word_title_hits[w] / df) < 0.25:
+            continue
         titles = target_word_titles[w]
         diversity = len(set(titles)) / len(titles)
         if diversity < 0.6:
             continue
-        if target_word_authors.get(w) and len(target_word_authors[w]) < 3:
-            continue
+        authors = target_word_authors.get(w, set())
+        if authors:
+            if len(authors) < 4:
+                continue
+            top_author_cnt = target_word_author_counts[w].most_common(1)[0][1]
+            if (top_author_cnt / df) > 0.45:
+                continue
         cands[w] = {
             "word": w,
             "post_ids": set(pids),
+            "authors": set(authors),
+            "author_counts": Counter(target_word_author_counts[w]),
             "variants": set(),
             "base_cnt": base_df[w],
         }
@@ -235,6 +263,8 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
     for w, c in cands.items():
         df = len(c["post_ids"])
         if df < min_posts:
+            continue
+        if c["authors"] and len(c["authors"]) < 4:
             continue
         p_t = df / n_target
         p_b = c["base_cnt"] / n_base
@@ -303,22 +333,32 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
         # 점수/빈도 순 정렬 (단, 상시어보다 고유 토픽어가 앞으로 오도록 정렬)
         comp.sort(key=lambda x: (x["word"] not in _BRIDGE_STOPWORDS, x["doc_count"], x["score"]), reverse=True)
         union_pids = set()
+        union_authors = set()
         for c in comp:
             union_pids |= c["post_ids"]
+            union_authors |= c.get("authors", set())
 
         if len(union_pids) < min_cluster_posts:
             continue
+        if union_authors and len(union_authors) < 4:
+            continue
 
-        # 덩어리 내 게시글들의 단어 노트에서 함께 자주 쓰인 연관어(Co-occurring words) 추출
+        # 덩어리 내 게시글들의 단어 노트에서 함께 자주 쓰인 연관어(Co-occurring words) 추출 (작성자당 최대 2회 캡핑)
         core_words = {c["word"] for c in comp}
         all_variants = {v for c in comp for v in c.get("variants", ())}
         assoc_counter = Counter()
+        assoc_author_cnt = defaultdict(Counter)
         for pid in union_pids:
+            p_author = (post_map[pid][4] or "").strip() if (pid in post_map and len(post_map[pid]) > 4) else ""
             for w in post_notes.get(pid, ()):
                 if w in core_words or w in all_variants:
                     continue
                 if any(w.startswith(cw) or cw.startswith(w) for cw in core_words):
                     continue
+                if p_author and not p_author.startswith("anon_"):
+                    if assoc_author_cnt[w][p_author] >= 2:
+                        continue
+                    assoc_author_cnt[w][p_author] += 1
                 assoc_counter[w] += 1
 
         assoc_kws = []

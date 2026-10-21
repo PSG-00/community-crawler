@@ -421,12 +421,11 @@
 
                         <!-- 토픽 관련 글 모아보기 버튼 (핵심 키워드 다중 통합 + 해당 시간대 자동 지정 검색) -->
                         {% set topic_search_phrase = topic.keyword_list[:4] | join(' OR ') if topic.keyword_list else '' %}
-                        {% set topic_label_phrase = topic.keyword_list[:4] | join(' · ') if topic.keyword_list else '' %}
                         <button type="button" onclick="quickSearchTopic('{{ topic_search_phrase | replace("'", "\\'") }}', '{{ topic.search_start }}', '{{ topic.search_end }}')"
                                 class="w-full bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 text-xs sm:text-sm font-semibold py-2 rounded-xl transition flex items-center justify-center gap-1.5 border border-indigo-200 active:scale-[0.99]"
                                 title="'{{ topic_search_phrase }}' ({{ topic.time_display }}) 관련 글 전체 모아보기">
                             <i class="fa-solid fa-magnifying-glass text-xs"></i>
-                            <span>이 시간대 관련 글 모아보기 {% if topic_label_phrase %}<span class="font-normal opacity-85 text-[11px] sm:text-xs">({{ topic_label_phrase }})</span>{% endif %}</span>
+                            <span>이 시간대 관련 글 모아보기</span>
                         </button>
                     </div>
                 </div>

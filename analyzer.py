@@ -22,9 +22,10 @@ class TopicAnalyzer:
         self.gallery_id = gallery_id
 
     def fetch_posts_between(self, start_dt, end_dt):
-        """특정 기간의 게시글 (id, title, content, created_at, author_code) 조회"""
+        """특정 기간의 게시글 (id, title, content, created_at, author_key) 조회"""
         query = """
-            SELECT post_id, title, content, created_at, author_code
+            SELECT post_id, title, content, created_at,
+                   COALESCE(NULLIF(author_code, ''), NULLIF(nickname, ''), 'anon_' || post_id::text) AS author_key
             FROM dc_posts
             WHERE gallery_id = %s
               AND created_at >= %s

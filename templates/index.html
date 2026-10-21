@@ -147,15 +147,15 @@
 
                             <label class="shrink-0 cursor-pointer">
                                 <input type="radio" name="period" value="custom" id="periodCustom" onchange="toggleCustomDate(true);" class="hidden peer" {% if period == 'custom' %}checked{% endif %}>
-                                <span class="px-2.5 py-1 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">직접 선택</span>
+                                <span class="px-2.5 py-1 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">시간/날짜 지정</span>
                             </label>
                         </div>
 
-                        <!-- 직접 선택 시 펼쳐지는 날짜 피커 -->
+                        <!-- 직접 선택 시 펼쳐지는 날짜/시간 피커 -->
                         <div id="customDateBox" class="{% if period != 'custom' %}hidden{% endif %} flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-dashed border-slate-200">
-                            <input type="date" name="start_date" value="{{ start_date }}" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700">
+                            <input type="datetime-local" id="startDateInput" name="start_date" value="{{ start_date }}" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700">
                             <span class="text-xs text-slate-400">~</span>
-                            <input type="date" name="end_date" value="{{ end_date }}" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700">
+                            <input type="datetime-local" id="endDateInput" name="end_date" value="{{ end_date }}" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700">
                             <button type="submit" class="bg-slate-800 text-white text-xs font-medium rounded-lg px-2.5 py-1 hover:bg-slate-900 transition">적용</button>
                         </div>
                     </div>
@@ -219,7 +219,11 @@
 
                     {% if period != 'all' %}
                     <span class="bg-slate-200 text-slate-700 px-2 py-0.5 rounded-lg text-xs font-medium">
-                        {{ period | replace('1d','오늘') | replace('7d','최근 7일') | replace('30d','최근 30일') | replace('custom','기간 지정') }}
+                        {% if period == 'custom' and (start_date or end_date) %}
+                        <i class="fa-regular fa-clock mr-1"></i>{{ start_date | replace('T', ' ') }} ~ {{ end_date | replace('T', ' ') }}
+                        {% else %}
+                        {{ period | replace('1d','오늘') | replace('7d','최근 7일') | replace('30d','최근 30일') | replace('custom','시간/날짜 지정') }}
+                        {% endif %}
                     </span>
                     {% endif %}
 
@@ -399,13 +403,13 @@
                     </div>
 
                     <div>
-                        <!-- 급상승 연관어 칩 (터치 시 즉시 검색) -->
+                        <!-- 급상승 연관어 칩 (터치 시 해당 떡밥 시간대로 즉시 검색) -->
                         <div class="text-[11px] text-slate-400 font-medium mb-1.5">
-                            <span>급상승 연관어 (클릭 시 관련 글 즉시 검색):</span>
+                            <span>단어 노트 연관어 (클릭 시 이 떡밥 시간대로 즉시 검색):</span>
                         </div>
                         <div class="flex flex-wrap gap-1.5 mb-2.5">
                             {% for kw in topic.keywords %}
-                            <button type="button" onclick="quickSearchTopic('{{ kw.word if kw.word is defined else kw }}')"
+                            <button type="button" onclick="quickSearchTopic('{{ kw.word if kw.word is defined else kw }}', '{{ topic.search_start }}', '{{ topic.search_end }}')"
                                     class="bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-900 border border-amber-200/80 text-xs px-2.5 py-1 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs">
                                 <span>#{{ kw.word if kw.word is defined else kw }}</span>
                                 {% if kw.lift is defined %}
@@ -415,14 +419,14 @@
                             {% endfor %}
                         </div>
 
-                        <!-- 떡밥 관련 글 모아보기 버튼 (떡밥 핵심 키워드 다중 통합 검색) -->
-                        {% set topic_search_phrase = topic.keyword_list[:3] | join(' OR ') if topic.keyword_list else '' %}
-                        {% set topic_label_phrase = topic.keyword_list[:3] | join(' · ') if topic.keyword_list else '' %}
-                        <button type="button" onclick="quickSearchTopic('{{ topic_search_phrase | replace("'", "\\'") }}')"
+                        <!-- 떡밥 관련 글 모아보기 버튼 (떡밥 핵심 키워드 다중 통합 + 해당 떡밥 시간대 자동 지정 검색) -->
+                        {% set topic_search_phrase = topic.keyword_list[:4] | join(' OR ') if topic.keyword_list else '' %}
+                        {% set topic_label_phrase = topic.keyword_list[:4] | join(' · ') if topic.keyword_list else '' %}
+                        <button type="button" onclick="quickSearchTopic('{{ topic_search_phrase | replace("'", "\\'") }}', '{{ topic.search_start }}', '{{ topic.search_end }}')"
                                 class="w-full bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 text-xs sm:text-sm font-semibold py-2 rounded-xl transition flex items-center justify-center gap-1.5 border border-indigo-200 active:scale-[0.99]"
-                                title="'{{ topic_search_phrase }}' 관련 글 전체 모아보기">
+                                title="'{{ topic_search_phrase }}' ({{ topic.time_display }}) 관련 글 전체 모아보기">
                             <i class="fa-solid fa-magnifying-glass text-xs"></i>
-                            <span>이 떡밥 관련 글 전체 모아보기 {% if topic_label_phrase %}<span class="font-normal opacity-85 text-[11px] sm:text-xs">({{ topic_label_phrase }})</span>{% endif %}</span>
+                            <span>이 떡밥 시간대 글 모아보기 {% if topic_label_phrase %}<span class="font-normal opacity-85 text-[11px] sm:text-xs">({{ topic_label_phrase }})</span>{% endif %}</span>
                         </button>
                     </div>
                 </div>
@@ -485,8 +489,8 @@
             }
         });
 
-        // 떡밥 키워드 터치 시 검색 탭으로 즉시 전환 후 검색 실행
-        function quickSearchTopic(keyword) {
+        // 떡밥 키워드 터치 시 검색 탭으로 즉시 전환 후 해당 떡밥 시간대(startDt ~ endDt)로 검색 실행
+        function quickSearchTopic(keyword, startDt, endDt) {
             if (!keyword) return;
             switchMainTab('search');
             const input = document.querySelector('input[name="q"]');
@@ -494,6 +498,19 @@
                 input.value = keyword;
                 const targetSelect = document.querySelector('select[name="target"]');
                 if (targetSelect) targetSelect.value = 'all';
+
+                const subInput = document.querySelector('input[name="sub_q"]');
+                if (subInput) subInput.value = '';
+
+                if (startDt && endDt) {
+                    const customRadio = document.getElementById('periodCustom');
+                    if (customRadio) customRadio.checked = true;
+                    toggleCustomDate(true);
+                    const startInput = document.getElementById('startDateInput');
+                    const endInput = document.getElementById('endDateInput');
+                    if (startInput) startInput.value = startDt;
+                    if (endInput) endInput.value = endDt;
+                }
                 document.getElementById('searchForm').submit();
             }
         }

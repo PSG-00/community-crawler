@@ -12,14 +12,21 @@ from database import get_db
 app = FastAPI(title="DC Inside Community 90-Day Archive Search")
 templates = Jinja2Templates(directory="templates")
 
+def build_dot_tolerant_regex(term: str) -> str:
+    """글자 사이에 점/기호를 넣어 우회한 단어(예: 우.리.은.행, 서.수)까지 매칭하는 정규식"""
+    chars = [re.escape(ch) for ch in term.strip() if ch.strip()]
+    if len(chars) <= 1:
+        return re.escape(term.strip())
+    return r"[.,/·•_~\-\s]{0,2}".join(chars)
+
 def highlight_keywords_in_text(text: str, keywords: list) -> str:
-    """텍스트 내 모든 키워드에 <mark> 하이라이팅 적용 (줄바꿈 보존)"""
+    """텍스트 내 모든 키워드에 <mark> 하이라이팅 적용 (줄바꿈 보존, 점 우회 표기 포함)"""
     if not text:
         return ""
     escaped = html.escape(text)
-    valid_kws = [html.escape(k.strip()) for k in keywords if k and len(k.strip()) >= 2]
+    valid_kws = [k.strip() for k in keywords if k and len(k.strip()) >= 2]
     for kw in valid_kws:
-        pattern = re.compile(re.escape(kw), re.IGNORECASE)
+        pattern = re.compile(build_dot_tolerant_regex(html.escape(kw)), re.IGNORECASE)
         escaped = pattern.sub(r'<mark class="bg-amber-300 text-black px-1 rounded font-bold">\g<0></mark>', escaped)
     # 줄바꿈 태그 변환
     return escaped.replace("\n", "<br>")
@@ -31,16 +38,16 @@ def generate_snippet(text: str, keywords: list) -> str:
     # 연속 줄바꿈 제거 후 단일 라인으로 스니펫 생성
     single_line = re.sub(r'\s+', ' ', text).strip()
     escaped_text = html.escape(single_line)
-    valid_kws = [html.escape(k.strip()) for k in keywords if k and len(k.strip()) >= 2]
+    valid_kws = [k.strip() for k in keywords if k and len(k.strip()) >= 2]
 
     if not valid_kws:
         return escaped_text[:160] + ("..." if len(escaped_text) > 160 else "")
 
     first_pos = len(escaped_text)
     for kw in valid_kws:
-        pos = escaped_text.lower().find(kw.lower())
-        if pos != -1 and pos < first_pos:
-            first_pos = pos
+        m = re.search(build_dot_tolerant_regex(html.escape(kw)), escaped_text, re.IGNORECASE)
+        if m and m.start() < first_pos:
+            first_pos = m.start()
 
     if first_pos != len(escaped_text):
         start = max(0, first_pos - 40)
@@ -50,7 +57,7 @@ def generate_snippet(text: str, keywords: list) -> str:
         snippet = escaped_text[:160] + ("..." if len(escaped_text) > 160 else "")
 
     for kw in valid_kws:
-        pattern = re.compile(re.escape(kw), re.IGNORECASE)
+        pattern = re.compile(build_dot_tolerant_regex(html.escape(kw)), re.IGNORECASE)
         snippet = pattern.sub(r'<mark class="bg-amber-300 text-black px-1 rounded font-bold">\g<0></mark>', snippet)
 
     return snippet
@@ -81,9 +88,9 @@ def parse_search_terms(query_str: str):
                 terms.append(val)
     return terms, op
 
-def build_search_filter(terms: list, op: str, target: str):
+def build_search_filter(terms: list, op: str, target: str, dot_tolerant: bool = False):
     """
-    다중 키워드 조건절 및 바인딩 파라미터 생성 (pg_bigm GIN 인덱스 완벽 호환)
+    다중 키워드 조건절 및 바인딩 파라미터 생성 (pg_bigm GIN 인덱스 완벽 호환, 시간대 검색 시 점 우회 단어 포함)
     """
     sub_clauses = []
     params = []
@@ -91,11 +98,19 @@ def build_search_filter(terms: list, op: str, target: str):
     for term in terms:
         pattern = f"%{term}%"
         if target == "title":
-            sub_clauses.append("title LIKE %s")
-            params.append(pattern)
+            if dot_tolerant:
+                sub_clauses.append("(title LIKE %s OR regexp_replace(title, '[.,/·•_~-]', '', 'g') LIKE %s)")
+                params.extend([pattern, pattern])
+            else:
+                sub_clauses.append("title LIKE %s")
+                params.append(pattern)
         elif target == "content":
-            sub_clauses.append("content LIKE %s")
-            params.append(pattern)
+            if dot_tolerant:
+                sub_clauses.append("(content LIKE %s OR regexp_replace(content, '[.,/·•_~-]', '', 'g') LIKE %s)")
+                params.extend([pattern, pattern])
+            else:
+                sub_clauses.append("content LIKE %s")
+                params.append(pattern)
         elif target == "nickname":
             sub_clauses.append("nickname LIKE %s")
             params.append(pattern)
@@ -103,8 +118,16 @@ def build_search_filter(terms: list, op: str, target: str):
             sub_clauses.append("author_code = %s")
             params.append(term)
         else: # all: 제목 또는 본문
-            sub_clauses.append("(title LIKE %s OR content LIKE %s)")
-            params.extend([pattern, pattern])
+            if dot_tolerant:
+                sub_clauses.append(
+                    "(title LIKE %s OR content LIKE %s "
+                    "OR regexp_replace(title, '[.,/·•_~-]', '', 'g') LIKE %s "
+                    "OR regexp_replace(content, '[.,/·•_~-]', '', 'g') LIKE %s)"
+                )
+                params.extend([pattern, pattern, pattern, pattern])
+            else:
+                sub_clauses.append("(title LIKE %s OR content LIKE %s)")
+                params.extend([pattern, pattern])
 
     if not sub_clauses:
         return "", []
@@ -150,21 +173,27 @@ def execute_search(
         where_clauses = []
         params = []
 
+        # 시간대 지정 검색(분 단위 범위)이나 오늘(1d) 검색은 스캔 행 수가 적으므로 점 우회 표기(우.리.은.행 등)도 함께 매칭
+        is_time_scoped = (
+            period == "1d"
+            or (period == "custom" and bool(start_date or end_date))
+        )
+
         # 1. 1차 기본 검색 조건 (다중 키워드 지원)
         if valid_terms:
-            cond, p = build_search_filter(valid_terms, op, target)
+            cond, p = build_search_filter(valid_terms, op, target, dot_tolerant=is_time_scoped)
             if cond:
                 where_clauses.append(cond)
                 params.extend(p)
 
         # 2. 2차 결과 내 재검색 조건 (AND 연산 결합)
         if valid_sub_terms:
-            sub_cond, sub_p = build_search_filter(valid_sub_terms, sub_op, sub_target)
+            sub_cond, sub_p = build_search_filter(valid_sub_terms, sub_op, sub_target, dot_tolerant=is_time_scoped)
             if sub_cond:
                 where_clauses.append(sub_cond)
                 params.extend(sub_p)
 
-        # 3. 날짜 필터링 조건
+        # 3. 날짜 및 시간대 필터링 조건
         if period == "1d":
             where_clauses.append("created_at >= NOW() - INTERVAL '1 day'")
         elif period == "7d":
@@ -175,11 +204,17 @@ def execute_search(
             where_clauses.append("created_at >= NOW() - INTERVAL '90 days'")
         elif period == "custom":
             if start_date:
-                where_clauses.append("created_at >= %s")
-                params.append(start_date)
+                s_clean = start_date.strip().replace("T", " ")
+                where_clauses.append("created_at >= %s::timestamp")
+                params.append(s_clean)
             if end_date:
-                where_clauses.append("created_at < (%s::date + INTERVAL '1 day')")
-                params.append(end_date)
+                e_clean = end_date.strip().replace("T", " ")
+                if ":" in e_clean:
+                    where_clauses.append("created_at <= (%s::timestamp + INTERVAL '59 seconds')")
+                    params.append(e_clean)
+                else:
+                    where_clauses.append("created_at < (%s::date + INTERVAL '1 day')")
+                    params.append(e_clean)
 
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -270,11 +305,17 @@ def get_recent_topics(limit: int = 16):
             # 주요 키워드 리스트
             keyword_list = [k["word"] if isinstance(k, dict) else str(k) for k in kws]
 
+            # 떡밥 시간대 검색용 시작/종료 시각 (앞뒤 5분 여유 포함, datetime-local 포맷)
+            search_start = (w_start - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M")
+            search_end = (w_end + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M")
+
             topics.append({
                 "event_id": r[0],
                 "gallery_id": r[1],
                 "window_start": str(r[2]),
                 "window_end": str(r[3]),
+                "search_start": search_start,
+                "search_end": search_end,
                 "time_display": time_display,
                 "title": r[4],
                 "summary": r[5],

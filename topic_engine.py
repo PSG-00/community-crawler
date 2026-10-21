@@ -1,22 +1,11 @@
 """
-topic_engine.py — 사전/형태소분석기 없이 동작하는 떡밥 후보 추출 엔진 (순수 함수, DB 의존 없음)
-
-핵심 아이디어
-1. 띄어쓰기(어절) 기준으로 단어를 자르고, 끝에 붙은 조사만 떼어낸다. (형태소 분석기 X → '공완' 같은 파편 원천 차단)
-2. '평소에도 매일 나오는 말'은 떡밥이 아니다.
-   → 지난 며칠간 매일 등장한 단어(총공, 스밍, 센모닝, ㅌㅍㅇㅈ ...)는 자동으로 '루틴'으로 분류 (사전 등록 불필요)
-3. 진짜 떡밥 = '여러 사람이 서로 다른 문장으로' 같은 단어를 말하는 것.
-   → 같은 제목 복붙/초단문 도배(미남시, 까엉시 ...)는 제목 다양성 점수로 자동 배제
-4. 이렇게 걸러낸 '급상승 단어 + 대표 글'만 LLM에 보내서 묶고 요약하게 한다. (토큰 절약 + 정확도↑)
+topic_engine.py — LLM 없이 100% 단어 노트(Word Note)와 게시글 내 연관성(Co-occurrence)만으로
+실제 갤러리 떡밥 덩어리와 시간대를 추출하는 엔진
 """
 import re
 import math
-import json
-import time
-import threading
-import urllib.request
-import urllib.error
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
+from datetime import timedelta
 
 # 어절 끝 조사/어미 (긴 것부터 매칭)
 _JOSA = sorted([
@@ -26,7 +15,7 @@ _JOSA = sorted([
     "은", "는", "이", "가", "을", "를", "에", "의", "도", "만", "랑", "로", "와", "과", "나", "야", "아",
 ], key=len, reverse=True)
 
-# 디시/일상 범용어 (아주 소수만 유지 — 대부분은 '루틴 자동 판정'이 처리)
+# 디시/일상 범용 기능어 (의미 없는 부사·대명사·상투어)
 _GENERIC = {
     "진짜", "근데", "그냥", "오늘", "지금", "이거", "저거", "그거", "다들", "혹시", "아니", "너무", "완전",
     "존나", "개웃", "ㅋㅋ", "ㅋㅋㅋ", "ㅋㅋㅋㅋ", "ㅎㅎ", "ㅠㅠ", "ㄹㅇ", "ㅇㅇ", "뭐임", "뭐야", "있음", "없음",
@@ -34,21 +23,22 @@ _GENERIC = {
     "갤러", "갤러리", "념글", "개추", "사진", "영상", "링크", "근황", "후기", "질문", "정보", "이번", "제발",
     "완료", "너도", "사실", "있어", "알아", "하나", "처음", "애들", "글을", "어제", "금일", "내일", "바보",
     "사람", "생각", "느낌", "그래서", "근데요", "ㅇㅈ", "인증", "센갤", "갤에", "갤러들", "있네", "나도",
-    "갑자기", "솔직히", "약간", "거의", "원래", "계속", "다시", "일단", "그냥", "진짜로", "급하게", "생각나네",
-    "안녕하세요", "점심", "저녁", "아침", "출근", "퇴근", "떡밥", "벽갤", "리센느", "센둥이", "센둥이들",
-    # 사용자가 명시적으로 떡밥에서 제외 요청한 팬 루틴 (나머지는 '매일 나오는 말' 자동 판정이 처리)
+    "갑자기", "솔직히", "약간", "거의", "원래", "계속", "다시", "일단", "진짜로", "급하게", "생각나네", "어떻게",
+    "안녕하세요", "점심", "저녁", "아침", "출근", "퇴근", "떡밥", "벽갤", "리센느", "센둥이", "센둥이들", "본인",
+    "여기에", "여기", "거기", "저기", "누가", "무슨", "어떤", "모든", "전부", "조금", "많이", "제일", "가장",
+    "보니까", "봤는데", "보는", "보고", "할까", "해야", "되나", "되는", "된다", "맞음", "맞냐", "아님", "아니라",
     "총공", "스밍", "투표", "출석", "출첵", "총공자", "오이쉬", "오이쉬에", "야호",
 }
 
 _URL_RE = re.compile(r'https?://\S+|www\.\S+|\S+\.(com|net|org|kr|be|me|io|ly)\S*', re.I)
-# 디시 금칙어 우회용 글자 사이 점/슬래시/쉼표 결합 (우.리.은.행 -> 우리은행, 은.행 -> 은행)
+# 디시 금칙어 우회용 글자 사이 점/슬래시/쉼표 결합 (우.리.은.행 -> 우리은행, 서.수 -> 서수)
 _INTER_PUNCT_RE = re.compile(r'(?<=[가-힣0-9])[.,/·•_~\-]+(?=[가-힣])')
 _CLEAN_RE = re.compile(r'[^0-9A-Za-z가-힣ㄱ-ㅎ\s]')
 # 시간 맞춤 놀이(미남시, 까엉시, 경은씨+2, 중간시 ...): 짧은 제목이 '시/씨'로 끝나는 패턴
 _TIMECALL_RE = re.compile(r'^[^\s]{0,14}[시씨](간)?\s*([+@\-]\s*\d*)?[!~.ㅋㅎㅠㅜ\s]*$')
 # 총공/스밍/투표인증/인사 등 루틴성 게시글 제목 패턴
 _RITUAL_TITLE_RE = re.compile(
-    r'(ㅌㅍㅇㅈ|투표\s*인증|스밍\s*인증|총공\s*(완|완료|\d+일차|오이쉬|다녀왔)|오이쉬에?\s*~(?!.*무대)|오이쉬에?\s*(총공|완|완료)|^센모닝|^센나잇|^출첵|^출석)',
+    r'(ㅌㅍㅇㅈ|투표\s*인증|스밍\s*인증|총공[^\n]{0,16}(완|완료|인증|일차)|총공\s*(완|완료|\d+일차|오이쉬|다녀왔)|오이쉬에?\s*~(?!.*무대)|오이쉬에?\s*(총공|완|완료)|^센모닝|^센나잇|^출첵|^출석)',
     re.I
 )
 
@@ -65,13 +55,11 @@ def normalize_word(w):
         return ""
     if re.fullmatch(r'[0-9]+', w):
         return ""
-    # '미남시', '경은시', '경은씨', '중간시' 같은 시간 맞춤 놀이 단어
     if (w.endswith("시") or w.endswith("씨")) and len(w) <= 5:
         return ""
-    # 총공완, 총공완료, 스밍완료 등 루틴 변형
     if re.match(r'^(총공|스밍|투표|출석|음총|댓총|센모닝|센나잇)', w):
         return ""
-    if re.fullmatch(r'[ㄱ-ㅎ]+', w) and len(set(w)) <= 2:  # ㅋㅋㅋ, ㅎㅎ 류
+    if re.fullmatch(r'[ㄱ-ㅎ]+', w) and len(set(w)) <= 2:
         return ""
     return w
 
@@ -90,8 +78,8 @@ def is_ritual_title(title):
 
 
 def extract_words(title, content=""):
-    """제목(가중) + 본문 앞부분에서 어절 단위 단어 집합 추출"""
-    text = f"{title or ''} {(content or '')[:200] if content and content != '__EMPTY__' else ''}"
+    """게시글 1개의 [단어 노트] 생성: 점 찍힌 단어 복원 + 어절 분리 + 조사 제거"""
+    text = f"{title or ''} {(content or '')[:250] if content and content != '__EMPTY__' else ''}"
     text = _URL_RE.sub(" ", text)
     text = _INTER_PUNCT_RE.sub("", text)
     text = _CLEAN_RE.sub(" ", text)
@@ -105,9 +93,9 @@ def extract_words(title, content=""):
 
 def merge_prefix_family(cands):
     """
-    포함관계(접두사) 묶기:
-    - '무아'(34건) + '무아짱'(4건) → 더 많이 쓰인 '무아'(38건)로 대표어 통합
-    - '검색'(6건) + '검색기록'(21건) → 더 구체적이고 많이 쓰인 '검색기록'(27건)으로 대표어 통합
+    접두사 포함관계 묶기:
+    - '무아'(34건) + '무아짱'(4건) → '무아'(38건)
+    - '검색'(6건) + '검색기록'(21건) → '검색기록'(27건)
     """
     words = sorted(cands.keys(), key=len)
     absorbed = set()
@@ -118,8 +106,7 @@ def merge_prefix_family(cands):
             if long in absorbed or long not in cands:
                 continue
             if long.startswith(short) and len(short) >= 2:
-                # 더 많은 글에서 쓰인 쪽을 대표 단어(keeper)로 삼는다
-                if len(cands[long]["post_ids"]) > len(cands[short]["post_ids"]):
+                if len(cands[long]["post_ids"]) >= len(cands[short]["post_ids"]):
                     keeper, other = long, short
                 else:
                     keeper, other = short, long
@@ -134,14 +121,56 @@ def merge_prefix_family(cands):
     return cands
 
 
-def find_burst_candidates(target_posts, baseline_posts, baseline_hours, target_hours,
-                          routine_days=None, min_posts=5, max_words=12):
+def _are_words_related(c1, c2, post_notes):
     """
-    target_posts / baseline_posts: [(post_id, title, content, created_at, author_code)]
-    routine_days: {word: 과거 N일 중 등장한 일수} — 매일 나오는 말 자동 배제용 (없으면 생략)
-    반환: (후보 단어 리스트, post_id→post 매핑)
+    두 급상승 단어 후보가 같은 떡밥 덩어리인지 판정하는 3가지 고리:
+    1) 게시글 공유(동시출현): 같은 게시글의 단어 노트에 2번 이상 함께 등장하거나 겹침률 >= 18%
+    2) 어근/접미사/은어 변형:
+       - 한쪽이 다른 쪽으로 끝나거나 시작함 (예: 우이은행 <-> 은행, 우리은행 <-> 은행, 검색기록 <-> 기록)
+       - 4글자 이상에서 1글자만 다른 은어 변형 (예: 우리은행 <-> 우이은행)
+       - 공통 2글자 이상 어미/어근 공유 (예: 1호선 <-> 2호선 <-> 4호선, 슈붕 <-> 팥붕 <-> 붕어빵)
+    3) 단어 노트 문맥 공유: 두 단어가 들어간 게시글들의 단어 노트 상위 연관어가 겹침
+    """
+    w1, w2 = c1["word"], c2["word"]
+    pids1, pids2 = c1["post_ids"], c2["post_ids"]
+
+    # 고리 1: 직접 게시글 공유
+    inter = len(pids1 & pids2)
+    min_len = max(1, min(len(pids1), len(pids2)))
+    if inter >= 2 or (inter / min_len) >= 0.18:
+        return True
+
+    # 고리 2: 글자 뿌리 / 은어 변형
+    short, long = (w1, w2) if len(w1) <= len(w2) else (w2, w1)
+    if len(short) >= 2 and (long.startswith(short) or long.endswith(short)):
+        return True
+    if len(w1) == len(w2) and len(w1) >= 4 and sum(a != b for a, b in zip(w1, w2)) == 1:
+        return True
+    # 공통 접미사 2글자 이상 (예: 1호선/2호선/4호선 -> '호선')
+    if len(w1) >= 3 and len(w2) >= 3 and w1[-2:] == w2[-2:]:
+        return True
+    # '붕어빵' <-> '슈붕'/'팥붕' 처럼 특수 줄임말이 1건이라도 같이 쓰였거나 공통 글자+문맥 공유
+    if inter >= 1 and (short[0] in long or short[-1] in long):
+        return True
+
+    # 고리 3: 단어 노트 주변 연관어(Context) 공유
+    ctx1 = Counter(w for pid in pids1 for w in post_notes.get(pid, ()) if w != w1)
+    ctx2 = Counter(w for pid in pids2 for w in post_notes.get(pid, ()) if w != w2)
+    top1 = {w for w, cnt in ctx1.most_common(6) if cnt >= 2}
+    top2 = {w for w, cnt in ctx2.most_common(6) if cnt >= 2}
+    if (w2 in top1) or (w1 in top2) or len(top1 & top2) >= 2:
+        return True
+
+    return False
+
+
+def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, target_hours=1,
+                          routine_days=None, min_posts=5, max_words=15):
+    """
+    1단계: 각 게시글의 단어 노트를 만들고 평소(24h) 대비 급상승한 단어 후보들을 추출
     """
     post_map = {}
+    post_notes = {}
     target_word_posts = defaultdict(set)
     target_word_titles = defaultdict(list)
     target_word_authors = defaultdict(set)
@@ -152,9 +181,12 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours, target_h
         if is_ritual_title(title):
             continue
         post_map[pid] = p
-        for w in extract_words(title, content):
+        note = extract_words(title, content)
+        post_notes[pid] = note
+        t_clean = re.sub(r'\s+', '', title or '')
+        for w in note:
             target_word_posts[w].add(pid)
-            target_word_titles[w].append(re.sub(r'\s+', '', title or ''))
+            target_word_titles[w].append(t_clean)
             if author:
                 target_word_authors[w].add(author)
 
@@ -168,7 +200,6 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours, target_h
     n_target = max(1, len(post_map))
     n_base = max(1, sum(1 for p in baseline_posts if not is_ritual_title(p[1])))
 
-    # 1차 후보 수집 (접두사 병합 전에는 3건 이상부터 열어둠)
     cands = {}
     for w, pids in target_word_posts.items():
         df = len(pids)
@@ -187,7 +218,6 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours, target_h
             "base_cnt": base_df[w],
         }
 
-    # 접두사 가족 병합 후 통합 빈도로 Lift / Z-score 정확히 재계산
     cands = merge_prefix_family(cands)
     final_cands = []
     for w, c in cands.items():
@@ -212,192 +242,144 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours, target_h
         final_cands.append(c)
 
     ranked = sorted(final_cands, key=lambda x: x["score"], reverse=True)[:max_words]
-    return ranked, post_map
+    return ranked, post_map, post_notes, base_df, n_target, n_base
 
 
-def build_llm_digest(cands, post_map, per_word=5, max_posts=45, body_chars=60):
-    """LLM에 보낼 압축 요약본: 급상승 단어 표 + 단어별 대표 글 (중복 제목 제거)"""
-    lines_kw = []
-    chosen = []
-    seen_ids, seen_titles = set(), set()
-    for c in cands:
-        var = f" (변형: {', '.join(sorted(c['variants'])[:3])})" if c["variants"] else ""
-        lines_kw.append(f"- {c['word']}{var}: {c['doc_count']}개 글, 평소 대비 {c['lift']}배")
-        picked = 0
-        # 시간 순으로 고르게 분포되도록 정렬
-        for pid in sorted(c["post_ids"]):
-            if picked >= per_word or len(chosen) >= max_posts:
-                break
-            p = post_map.get(pid)
-            if not p:
-                continue
-            tkey = re.sub(r'\s+', '', p[1] or '')
-            if pid in seen_ids or tkey in seen_titles:
-                continue
-            seen_ids.add(pid)
-            seen_titles.add(tkey)
-            chosen.append(p)
-            picked += 1
-
-    post_lines = []
-    for p in sorted(chosen, key=lambda x: x[3]):
-        body = re.sub(r'\s+', ' ', p[2] or '').strip()
-        body = "" if body == "__EMPTY__" else body
-        body = _URL_RE.sub("", body)[:body_chars]
-        ts = p[3].strftime('%H:%M') if hasattr(p[3], 'strftime') else str(p[3])[11:16]
-        post_lines.append(f"[{p[0]}] {ts} {p[1]}" + (f" | {body}" if body else ""))
-    return "\n".join(lines_kw), "\n".join(post_lines)
-
-
-# ============================================================
-# LLM (Groq) 호출 — 무료 플랜 한도(분당 8K 토큰 / 일 200K 토큰 / 분당 30회 / 일 1K회) 엄수
-# ============================================================
-class GroqRateLimiter:
-    """최근 60초 토큰 사용량 + 일일 토큰 사용량을 직접 추적해서, 한도에 닿기 전에 미리 기다린다."""
-
-    def __init__(self, tpm=8000, tpd=200000, rpm=30, safety=0.8):
-        self.tpm = int(tpm * safety)        # 6,400 토큰/분까지만 사용
-        self.tpd = int(tpd * safety)        # 160,000 토큰/일까지만 사용
-        self.rpm = int(rpm * safety)
-        self.window = deque()               # (ts, tokens)
-        self.day_key = None
-        self.day_tokens = 0
-        self.cooldown_until = 0.0
-        self.lock = threading.Lock()
-
-    def _roll(self, now):
-        while self.window and now - self.window[0][0] > 60:
-            self.window.popleft()
-        dk = time.strftime("%Y-%m-%d", time.localtime(now))
-        if dk != self.day_key:
-            self.day_key, self.day_tokens = dk, 0
-
-    def acquire(self, est_tokens, max_wait=180):
-        """est_tokens 만큼 쓸 수 있을 때까지 대기. 일일 한도 초과 시 False."""
-        deadline = time.time() + max_wait
-        while True:
-            with self.lock:
-                now = time.time()
-                self._roll(now)
-                if self.day_tokens + est_tokens > self.tpd:
-                    return False
-                used = sum(t for _, t in self.window)
-                if now >= self.cooldown_until and used + est_tokens <= self.tpm and len(self.window) < self.rpm:
-                    self.window.append((now, est_tokens))   # 예약
-                    return True
-                wait = max(self.cooldown_until - now, (60 - (now - self.window[0][0]) + 0.5) if self.window else 1)
-            if time.time() + wait > deadline:
-                return False
-            time.sleep(min(max(wait, 1), 30))
-
-    def settle(self, est_tokens, real_tokens):
-        """예약해둔 추정치를 실제 사용량으로 교정"""
-        with self.lock:
-            for i in range(len(self.window) - 1, -1, -1):
-                if self.window[i][1] == est_tokens:
-                    self.window[i] = (self.window[i][0], real_tokens)
-                    break
-            self.day_tokens += real_tokens
-
-    def penalize(self, seconds):
-        with self.lock:
-            self.cooldown_until = max(self.cooldown_until, time.time() + seconds)
-
-
-GROQ_LIMITER = GroqRateLimiter()
-
-SYSTEM_PROMPT = (
-    "너는 아이돌 그룹 '리센느' 디시인사이드 마이너 갤러리(센갤)의 떡밥 분석가다. "
-    "갤러리 은어: 멤버=원이·리브·미나미·메이·제나, 팬덤=리마인, 센모닝/센나잇=인사, ㅌㅍㅇㅈ=투표인증, "
-    "'○○시'=멤버 생일 숫자 시각에 글 쓰는 놀이, 총공/스밍=정기 팬활동. "
-    "인사·시간 맞춤 놀이·총공/스밍/투표 인증 같은 매일 반복되는 루틴은 절대 떡밥이 아니다. "
-    "사실에 근거해서 짧고 구체적으로, 디시 특유의 가벼운 톤으로 쓴다. 과장·뉴스체·추측 금지. 반드시 JSON으로만 답한다."
-)
-
-
-def build_user_prompt(time_range_str, n_posts, kw_block, posts_block):
-    return f"""[분석 구간] {time_range_str} / 이 구간 전체 글 {n_posts}개
-
-[평소 대비 급상승한 단어] (통계로 미리 계산됨)
-{kw_block}
-
-[급상승 단어가 들어간 대표 글] ([글번호] 시각 제목 | 본문 앞부분)
-{posts_block}
-
-할 일:
-1. 위 단어들 중 같은 화제를 가리키는 것끼리 묶어서 '떡밥'을 만든다. 서로 무관한 화제는 별도 떡밥으로 나눈다. (최대 3개)
-2. 루틴(인사, ○○시, 총공/스밍/투표 인증, 출석), 의미 없는 단어, 근거 글이 2개 미만인 화제는 버린다. 진짜 떡밥이 없으면 빈 배열.
-3. keywords는 반드시 위 '급상승 단어' 목록에 있는 단어를 그대로 복사해서 2~4개 (검색에 그대로 쓰임). 중요도 순.
-4. title: 무슨 일인지 바로 알 수 있는 구체적 제목 (25자 이내). 글에 없는 내용 지어내지 말 것.
-5. summary: 글 내용에 근거한 2~3줄, 각 줄은 '• '로 시작.
-6. sample_post_ids: 근거가 된 글번호 3~6개.
-
-출력 형식:
-{{"topics":[{{"title":"","summary":"• ...\\n• ...","mood":"#태그 #태그","keywords":["",""],"sample_post_ids":[0]}}]}}"""
-
-
-def call_groq_topics(api_key, model, time_range_str, n_posts, kw_block, posts_block, log=print):
-    """급상승 요약본을 Groq에 보내 떡밥 JSON을 받는다. 실패 시 None."""
-    user_prompt = build_user_prompt(time_range_str, n_posts, kw_block, posts_block)
-    # 한국어는 대략 1글자 ≈ 1토큰으로 넉넉히 추정 + 출력/추론 여유 1,500
-    est = len(SYSTEM_PROMPT) + len(user_prompt) + 1500
-    if not GROQ_LIMITER.acquire(est):
-        log("Groq한도", f"일일/분당 토큰 예산 부족으로 이번 구간 LLM 분석 건너뜀 (추정 {est} 토큰)")
-        return None
-
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.2,
-        "max_completion_tokens": 1500,
-    }
-    if "gpt-oss" in model:
-        payload["reasoning_effort"] = "low"   # 추론 토큰 낭비 방지 (TPM 절약)
-
-    req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        },
-        method="POST",
+def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, target_hours=1.5,
+                             min_posts=5, min_cluster_posts=7):
+    """
+    2단계 (메인 엔진 — LLM 무사용):
+    급상승 단어 후보들을 3가지 연관성 고리로 묶어 '떡밥 단어 덩어리(Cluster)'를 만들고,
+    그 덩어리에 속한 게시글들의 단어 노트에서 함께 등장한 보조 연관어(모델, 광고, 커피차, 유튜브 등)를 추출한다.
+    """
+    cands, post_map, post_notes, base_df, n_target, n_base = find_burst_candidates(
+        target_posts, baseline_posts,
+        baseline_hours=baseline_hours, target_hours=target_hours,
+        min_posts=min_posts, max_words=15,
     )
-    try:
-        with urllib.request.urlopen(req, timeout=40) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        usage = data.get("usage", {}) or {}
-        real = int(usage.get("total_tokens") or est)
-        GROQ_LIMITER.settle(est, real)
-        content = data["choices"][0]["message"]["content"].strip()
-        content = content.replace("```json", "").replace("```", "").strip()
-        res = json.loads(content)
-        log("Groq", f"응답 OK (토큰 {real}, 오늘 누적 {GROQ_LIMITER.day_tokens})")
-        return res.get("topics", []) if isinstance(res, dict) else []
-    except urllib.error.HTTPError as he:
-        GROQ_LIMITER.settle(est, est)
-        body = ""
-        try:
-            body = he.read().decode("utf-8")[:300]
-        except Exception:
-            pass
-        if he.code == 429:
-            ra = he.headers.get("retry-after") or "30"
-            try:
-                wait = float(ra)
-            except ValueError:
-                wait = 30.0
-            GROQ_LIMITER.penalize(min(max(wait, 10), 600))
-            log("Groq한도", f"429 수신 → {wait:.0f}초 쿨다운. {body}")
+    if not cands:
+        return []
+
+    # 연관성 그래프 연결 요소(Connected Components)로 급상승 후보들을 덩어리로 묶기
+    n = len(cands)
+    adj = defaultdict(set)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _are_words_related(cands[i], cands[j], post_notes):
+                adj[i].add(j)
+                adj[j].add(i)
+
+    visited = set()
+    clusters = []
+    for i in range(n):
+        if i in visited:
+            continue
+        comp = []
+        queue = [i]
+        visited.add(i)
+        while queue:
+            curr = queue.pop(0)
+            comp.append(cands[curr])
+            for nxt in adj[curr]:
+                if nxt not in visited:
+                    visited.add(nxt)
+                    queue.append(nxt)
+
+        # 점수/빈도 순 정렬
+        comp.sort(key=lambda x: (x["doc_count"], x["score"]), reverse=True)
+        union_pids = set()
+        for c in comp:
+            union_pids |= c["post_ids"]
+
+        if len(union_pids) < min_cluster_posts:
+            continue
+
+        # 덩어리 내 게시글들의 단어 노트에서 함께 자주 쓰인 연관어(Co-occurring words) 추출
+        core_words = {c["word"] for c in comp}
+        all_variants = {v for c in comp for v in c.get("variants", ())}
+        assoc_counter = Counter()
+        for pid in union_pids:
+            for w in post_notes.get(pid, ()):
+                if w in core_words or w in all_variants:
+                    continue
+                if any(w.startswith(cw) or cw.startswith(w) for cw in core_words):
+                    continue
+                assoc_counter[w] += 1
+
+        assoc_kws = []
+        for w, cnt in assoc_counter.most_common(8):
+            # 덩어리 게시글 중 최소 3건 이상에서 함께 등장하고, 평소 대비 의미 있는 단어만 채택
+            if cnt < 3:
+                continue
+            p_t = cnt / n_target
+            p_b = base_df[w] / n_base
+            lift = round((p_t + 0.002) / (p_b + 0.002), 1)
+            if lift < 2.0:
+                continue
+            assoc_kws.append({
+                "word": w,
+                "lift": lift,
+                "count": cnt,
+                "is_assoc": True,
+            })
+            if len(assoc_kws) >= 3:
+                break
+
+        # 전체 키워드 리스트 (핵심 급상승어 + 단어 노트 동반 연관어)
+        keywords = [
+            {"word": c["word"], "lift": c["lift"], "count": c["doc_count"]}
+            for c in comp[:4]
+        ] + assoc_kws
+
+        # 이 떡밥 덩어리의 실제 발생 시작~종료 시간 계산
+        cluster_times = [post_map[pid][3] for pid in union_pids if pid in post_map]
+        actual_start = min(cluster_times)
+        actual_end = max(cluster_times)
+
+        # 대표 게시글 선정: 핵심어/연관어를 가장 많이 포함한 게시글 순으로 중복 제목 없이 4건 추출
+        kw_set = {k["word"] for k in keywords} | all_variants
+        scored_pids = sorted(
+            union_pids,
+            key=lambda pid: (
+                len(post_notes.get(pid, set()) & kw_set),
+                len((post_map[pid][1] or "").strip()),
+                pid,
+            ),
+            reverse=True,
+        )
+        rep_titles = []
+        seen_t = set()
+        for pid in scored_pids:
+            t_str = (post_map[pid][1] or "").strip()
+            t_key = re.sub(r'\s+', '', t_str)
+            if not t_str or t_key in seen_t:
+                continue
+            seen_t.add(t_key)
+            ts_str = post_map[pid][3].strftime("%H:%M")
+            rep_titles.append(f"• [{ts_str}] {t_str}")
+            if len(rep_titles) >= 4:
+                break
+
+        core_label = " · ".join(c["word"] for c in comp[:3])
+        assoc_label = " · ".join(a["word"] for a in assoc_kws[:2])
+        if assoc_label:
+            title = f"[{core_label}] + {assoc_label} 관련 떡밥"
         else:
-            log("Groq오류", f"HTTP {he.code}: {body}")
-        return None
-    except Exception as e:
-        GROQ_LIMITER.settle(est, est)
-        log("Groq오류", f"{type(e).__name__}: {e}")
-        return None
+            title = f"[{core_label}] 관련 떡밥 집중"
+
+        mood = " ".join(f"#{k['word']}" for k in keywords[:4])
+
+        clusters.append({
+            "title": title,
+            "summary": "\n".join(rep_titles),
+            "mood": mood,
+            "keywords": keywords,
+            "post_count": len(union_pids),
+            "sample_post_ids": sorted(union_pids, reverse=True)[:50],
+            "actual_start": actual_start,
+            "actual_end": actual_end,
+            "score": sum(c["score"] for c in comp[:2]),
+        })
+
+    clusters.sort(key=lambda x: (x["post_count"], x["score"]), reverse=True)
+    return clusters[:3]

@@ -109,36 +109,57 @@ def metadata_backfill_worker():
     log("백필", "🚀 과거 60일치 메타데이터(제목/작성자/IP) 초고속 수집 시작!")
     target_cutoff = datetime.now() - timedelta(days=DAYS_RETENTION)
 
-    page = 1
+    # 이미 수집된 건수가 있으면 그 지점부터 스마트 이어받기
+    start_page = 1
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM dc_posts")
+                cnt = cur.fetchone()[0]
+                if cnt > 1000:
+                    start_page = max(1, (cnt // 100) - 15)
+                    log("백필", f"📍 기존 수집량({cnt}건) 확인. Page {start_page}부터 바로 이어받기 시작합니다!")
+    except Exception:
+        start_page = 1
+
+    page = start_page
     consecutive_empty = 0
     total_saved = 0
 
     while True:
-        posts = parse_list_page(GALLERY_ID, page=page)
-        if not posts:
-            consecutive_empty += 1
-            if consecutive_empty >= 3:
-                log("백필", f"페이지 {page}에서 연속 빈 응답. 백필 종료.")
+        try:
+            posts = parse_list_page(GALLERY_ID, page=page)
+            if not posts:
+                consecutive_empty += 1
+                if consecutive_empty >= 5:
+                    log("백필", f"페이지 {page}에서 연속 5회 빈 응답. 백필 정상 종료.")
+                    break
+                time.sleep(1)
+                continue
+            consecutive_empty = 0
+
+            # 저장
+            saved = save_metadata_batch(posts)
+            total_saved += saved
+
+            # 끌올 글 방지: 해당 페이지의 "가장 최신 글(Top post)"이 60일 전으로 내려갔는지로 완벽 판정
+            top_dt = posts[0][6]
+            oldest_dt = min(p[6] for p in posts)
+
+            if page % 10 == 0 or page == start_page:
+                log("백필", f"📄 [Page {page}] {len(posts)}건 중 {saved}건 신규 저장 (페이지 상단: {top_dt} / 최저: {oldest_dt})")
+
+            # 페이지 최상단 글까지 60일 기준일보다 오래되었을 때만 진짜 종료!
+            if top_dt < target_cutoff:
+                log("백필", f"🎯 60일 기준일 도달! (페이지 최신글: {top_dt}) 총 {total_saved}건 추가 색인 완료.")
                 break
+
+            page += 1
+            time.sleep(0.08) # 방화벽 차단 방지용 안전 딜레이
+
+        except Exception as e:
+            log("백필", f"⚠️ Page {page} 처리 중 일시적 오류: {e} (재시도 중...)")
             time.sleep(1)
-            continue
-        consecutive_empty = 0
-
-        # 저장
-        saved = save_metadata_batch(posts)
-        total_saved += saved
-
-        oldest_dt = min(p[6] for p in posts)
-        if page % 10 == 0 or page == 1:
-            log("백필", f"📄 [Page {page}] {len(posts)}건 중 {saved}건 신규 저장 (누적: {total_saved}건 / 최저: {oldest_dt})")
-
-        # 60일 이전 도달 시 종료
-        if oldest_dt < target_cutoff:
-            log("백필", f"🎯 60일 기준일 도달! 총 {total_saved}건 색인 완료.")
-            break
-
-        page += 1
-        time.sleep(0.08) # 방화벽 차단 방지용 안전 딜레이
 
 # ================= 2. 백그라운드 본문 수집 워커 (멀티스레드) =================
 def content_fill_worker():

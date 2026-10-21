@@ -1,6 +1,6 @@
 import os
 import psycopg2
-from psycopg2 import pool
+from psycopg2.pool import ThreadedConnectionPool
 from contextlib import contextmanager
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -9,9 +9,9 @@ DB_NAME = os.getenv("DB_NAME", "dc_db")
 DB_USER = os.getenv("DB_USER", "dc_user")
 DB_PASS = os.getenv("DB_PASS", "dc_pass1234")
 
-# Connection Pool (Min 2, Max 20 connections)
-db_pool = psycopg2.pool.SimpleConnectionPool(
-    2, 20,
+# Multi-threaded Connection Pool (Min 2, Max 30 connections)
+db_pool = ThreadedConnectionPool(
+    2, 30,
     host=DB_HOST,
     port=DB_PORT,
     dbname=DB_NAME,

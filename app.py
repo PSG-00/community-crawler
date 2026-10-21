@@ -55,6 +55,66 @@ def generate_snippet(text: str, keywords: list) -> str:
 
     return snippet
 
+def parse_search_terms(query_str: str):
+    """
+    검색어 문자열을 분석하여 (terms, operator) 반환
+    예:
+      '우리은행 OR 카드' -> (['우리은행', '카드'], 'OR')
+      '우리은행 카드'    -> (['우리은행', '카드'], 'AND')
+      '우리은행, 카드'   -> (['우리은행', '카드'], 'AND')
+      '"우리은행 카드"'   -> (['우리은행 카드'], 'AND')
+    """
+    q = (query_str or "").strip()
+    if not q:
+        return [], "AND"
+    if re.search(r"\s+OR\s+", q, flags=re.IGNORECASE):
+        tokens = re.split(r"\s+OR\s+", q, flags=re.IGNORECASE)
+        op = "OR"
+        terms = [t.strip().strip('"\'') for t in tokens if t.strip()]
+    else:
+        op = "AND"
+        raw_tokens = re.findall(r'"([^"]+)"|(\S+)', q)
+        terms = []
+        for t1, t2 in raw_tokens:
+            val = (t1 or t2).strip(', \t')
+            if val:
+                terms.append(val)
+    return terms, op
+
+def build_search_filter(terms: list, op: str, target: str):
+    """
+    다중 키워드 조건절 및 바인딩 파라미터 생성 (pg_bigm GIN 인덱스 완벽 호환)
+    """
+    sub_clauses = []
+    params = []
+
+    for term in terms:
+        pattern = f"%{term}%"
+        if target == "title":
+            sub_clauses.append("title LIKE %s")
+            params.append(pattern)
+        elif target == "content":
+            sub_clauses.append("content LIKE %s")
+            params.append(pattern)
+        elif target == "nickname":
+            sub_clauses.append("nickname LIKE %s")
+            params.append(pattern)
+        elif target == "code":
+            sub_clauses.append("author_code = %s")
+            params.append(term)
+        else: # all: 제목 또는 본문
+            sub_clauses.append("(title LIKE %s OR content LIKE %s)")
+            params.extend([pattern, pattern])
+
+    if not sub_clauses:
+        return "", []
+
+    if len(sub_clauses) == 1:
+        return sub_clauses[0], params
+
+    combined = f"({f' {op} '.join(sub_clauses)})"
+    return combined, params
+
 def execute_search(
     q: Optional[str] = None,
     target: str = "all",
@@ -74,43 +134,35 @@ def execute_search(
     total_count = 0
     offset = (page - 1) * page_size
 
-    if keyword and target != "code" and len(keyword) < 2:
+    # 1. 다중 키워드 파싱
+    terms, op = parse_search_terms(keyword) if keyword else ([], "AND")
+    sub_terms, sub_op = parse_search_terms(sub_keyword) if sub_keyword else ([], "AND")
+
+    valid_terms = [t for t in terms if len(t) >= (1 if target == "code" else 2)]
+    valid_sub_terms = [t for t in sub_terms if len(t) >= (1 if sub_target == "code" else 2)]
+
+    if keyword and not valid_terms:
         error_msg = "기본 검색어는 최소 2글자 이상 입력해야 합니다."
-    elif sub_keyword and len(sub_keyword) < 2:
+    elif sub_keyword and not valid_sub_terms:
         error_msg = "결과 내 검색어는 최소 2글자 이상 입력해야 합니다."
-    elif keyword or sub_keyword or period != "all":
+    elif valid_terms or valid_sub_terms or period != "all":
         start_time = time.perf_counter()
         where_clauses = []
         params = []
 
-        # 1. 1차 기본 검색 조건
-        if keyword:
-            pattern = f"%{keyword}%"
-            if target == "title":
-                where_clauses.append("title LIKE %s")
-                params.append(pattern)
-            elif target == "content":
-                where_clauses.append("content LIKE %s")
-                params.append(pattern)
-            elif target == "nickname":
-                where_clauses.append("nickname LIKE %s")
-                params.append(pattern)
-            elif target == "code":
-                where_clauses.append("author_code = %s")
-                params.append(keyword)
-            else: # all: 제목 또는 본문
-                where_clauses.append("(title LIKE %s OR content LIKE %s)")
-                params.extend([pattern, pattern])
+        # 1. 1차 기본 검색 조건 (다중 키워드 지원)
+        if valid_terms:
+            cond, p = build_search_filter(valid_terms, op, target)
+            if cond:
+                where_clauses.append(cond)
+                params.extend(p)
 
-        # 2. 2차 결과 내 재검색 조건 (AND 연산)
-        if sub_keyword:
-            sub_pattern = f"%{sub_keyword}%"
-            if sub_target == "title":
-                where_clauses.append("title LIKE %s")
-                params.append(sub_pattern)
-            else: # all: 제목 또는 본문
-                where_clauses.append("(title LIKE %s OR content LIKE %s)")
-                params.extend([sub_pattern, sub_pattern])
+        # 2. 2차 결과 내 재검색 조건 (AND 연산 결합)
+        if valid_sub_terms:
+            sub_cond, sub_p = build_search_filter(valid_sub_terms, sub_op, sub_target)
+            if sub_cond:
+                where_clauses.append(sub_cond)
+                params.extend(sub_p)
 
         # 3. 날짜 필터링 조건
         if period == "1d":
@@ -148,11 +200,12 @@ def execute_search(
 
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
+        # 하이라이트할 모든 유효 단어 수집
         highlight_list = []
-        if keyword and target in ("all", "title", "content"):
-            highlight_list.append(keyword)
-        if sub_keyword:
-            highlight_list.append(sub_keyword)
+        if target in ("all", "title", "content"):
+            highlight_list.extend(valid_terms)
+        if sub_target in ("all", "title", "content"):
+            highlight_list.extend(valid_sub_terms)
 
         for r in rows:
             p_id, gall, title, content, nick, code, dt = r
@@ -164,7 +217,7 @@ def execute_search(
                 "content_snippet": generate_snippet(raw_content, highlight_list),
                 "full_content": highlight_keywords_in_text(raw_content, highlight_list),
                 "has_content": bool(raw_content.strip()),
-                "nickname": highlight_keywords_in_text(nick, [keyword] if target == "nickname" else []),
+                "nickname": highlight_keywords_in_text(nick, valid_terms if target == "nickname" else []),
                 "author_code": code,
                 "created_at": dt.strftime("%Y-%m-%d %H:%M")
             })

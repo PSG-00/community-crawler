@@ -70,6 +70,10 @@ def log(tag, msg):
     now_str = datetime.now(KST).strftime('%H:%M:%S')
     print(f"[{now_str}][{tag}] {msg}", flush=True)
 
+def get_now_kst():
+    """한국 표준시(KST) 기준 naive datetime 반환 (DB 쿼리 및 타임라인 동기화용)"""
+    return datetime.now(KST).replace(tzinfo=None)
+
 # Groq API Key (보안 푸시 프로텍션 우회 및 환경변수 1순위 참조)
 def get_default_groq_key():
     p1 = "gsk_uqUQXNP3EZ81lc0xv"
@@ -440,9 +444,9 @@ class TopicAnalyzer:
         return new_id
 
     def analyze_window(self, end_dt=None, window_hours=1, is_backfill=False):
-        """지정된 시간 범위의 떡밥 감지 및 분석 실행"""
+        """지정된 시간 범위의 떡밥 감지 및 분석 실행 (한국 표준시 KST 기준)"""
         if end_dt is None:
-            end_dt = datetime.now()
+            end_dt = get_now_kst()
         start_dt = end_dt - timedelta(hours=window_hours)
         baseline_start_dt = start_dt - timedelta(hours=24)
 
@@ -470,29 +474,39 @@ class TopicAnalyzer:
         return saved_events
 
     def cleanup_old_micro_topics(self):
-        """기준 미달(8건 미만) 소규모 잡담 이벤트 정리"""
+        """기준 미달(8건 미만) 소규모 잡담 및 12시간 이전 구형 데이터 정리"""
         try:
             with get_db() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("DELETE FROM gallery_events WHERE post_count < 8")
+                    cur.execute("DELETE FROM gallery_events WHERE post_count < 8 OR window_end < %s - INTERVAL '12 hours'", (get_now_kst(),))
                     deleted = cur.rowcount
                 conn.commit()
             if deleted > 0:
-                log("정리", f"🧹 기준 미달 소규모 잡담 이벤트 {deleted}건 정리 완료")
-        except Exception:
+                log("정리", f"🧹 기준 미달/구형 이벤트 {deleted}건 정리 완료")
+        except Exception as e:
             pass
 
 def run_analyzer_loop():
-    """20분 간격 실시간 대형 떡밥 감지 워커"""
+    """20분 간격 실시간 대형 떡밥 감지 워커 (KST 표준시 기준)"""
     analyzer = TopicAnalyzer(gallery_id="rescene1")
-    log("떡밥감지기", "🚀 실시간 대형 떡밥 감지 워커 시작 (20분 간격 / API 절약 모드)")
+    log("떡밥감지기", "🚀 실시간 대형 떡밥 감지 워커 시작 (KST 동기화 / 20분 간격 / Groq 120B 연동)")
     
-    # 기존 자잘한 잡담 데이터 1회 자동 청소
+    # 1. 기존 UTC 시차 오류 및 기준 미달 데이터 1회 자동 청소
     analyzer.cleanup_old_micro_topics()
+
+    # 2. 시작 즉시 오늘 저녁 최근 3시간(KST 기준) 떡밥 즉시 스캔
+    try:
+        now_k = get_now_kst()
+        log("떡밥감지기", f"📍 현재 KST 시각: {now_k.strftime('%Y-%m-%d %H:%M:%S')} (저녁 피크 시간대 즉시 분석)")
+        analyzer.analyze_window(end_dt=now_k - timedelta(hours=2), window_hours=1, is_backfill=False)
+        analyzer.analyze_window(end_dt=now_k - timedelta(hours=1), window_hours=1, is_backfill=False)
+        analyzer.analyze_window(end_dt=now_k, window_hours=1, is_backfill=False)
+    except Exception as e:
+        log("떡밥감지기", f"초기 저녁 스캔 오류: {e}")
 
     while True:
         try:
-            analyzer.analyze_window(end_dt=datetime.now(), window_hours=1, is_backfill=False)
+            analyzer.analyze_window(end_dt=get_now_kst(), window_hours=1, is_backfill=False)
         except Exception as e:
             log("떡밥감지기", f"분석 오류: {e}")
         time.sleep(1200) # 20분마다 실행

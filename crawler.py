@@ -116,7 +116,7 @@ def save_metadata_batch(records):
 # ================= 1. 초고속 백필 스레드 (과거 90일치 목록 57만 건 수집) =================
 def metadata_backfill_worker():
     log("백필", "🚀 과거 90일치 메타데이터(제목/작성자/IP) 초고속 수집 시작!")
-    target_cutoff = datetime.now() - timedelta(days=DAYS_RETENTION)
+    target_cutoff = datetime.now(KST).replace(tzinfo=None) - timedelta(days=DAYS_RETENTION)
 
     # 이미 수집된 건수가 있으면 그 지점부터 스마트 이어받기
     start_page = 1

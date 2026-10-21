@@ -14,6 +14,7 @@ jobs:
 
       - name: Setup Virtualenv & Dependencies
         run: |
+          sudo timedatectl set-timezone Asia/Seoul || true
           python3 -m venv venv
           ./venv/bin/pip install --upgrade pip
           ./venv/bin/pip install -r requirements.txt

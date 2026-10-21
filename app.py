@@ -2,7 +2,7 @@ import time
 import html
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -179,6 +179,8 @@ def execute_search(
         "has_next": has_next
     }
 
+KST = timezone(timedelta(hours=9))
+
 def get_recent_topics(limit: int = 8):
     """실시간 떡밥 타임라인 이벤트 조회"""
     try:
@@ -196,7 +198,7 @@ def get_recent_topics(limit: int = 8):
                 rows = cur.fetchall()
 
         topics = []
-        now_date = datetime.now().date()
+        now_date = datetime.now(KST).date()
         for r in rows:
             kws = r[7]
             if isinstance(kws, str):

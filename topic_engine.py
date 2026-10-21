@@ -370,9 +370,9 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
         core_label = " · ".join(c["word"] for c in comp[:3])
         assoc_label = " · ".join(a["word"] for a in assoc_kws[:2])
         if assoc_label:
-            title = f"[{core_label}] + {assoc_label} 관련 떡밥"
+            title = f"[{core_label}] + {assoc_label} 관련 토픽"
         else:
-            title = f"[{core_label}] 관련 떡밥 집중"
+            title = f"[{core_label}] 급상승 토픽"
 
         mood = " ".join(f"#{k['word']}" for k in keywords[:4])
 

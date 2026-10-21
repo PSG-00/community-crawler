@@ -131,7 +131,7 @@ class TopicAnalyzer:
                                 WHERE event_id = %s
                             """, (new_start, new_end, new_cnt, merged_kw_json, merged_pids, eid))
                         conn.commit()
-                        log("분석기", f"기존 떡밥 #{eid} ('{top_word}') 병합 ({new_start.strftime('%H:%M')}~{new_end.strftime('%H:%M')}, {new_cnt}건)")
+                        log("분석기", f"기존 토픽 #{eid} ('{top_word}') 병합 ({new_start.strftime('%H:%M')}~{new_end.strftime('%H:%M')}, {new_cnt}건)")
                         return None
 
                 cur.execute("""
@@ -161,7 +161,7 @@ class TopicAnalyzer:
     def analyze_window(self, end_dt=None, window_minutes=90):
         """
         LLM 무사용 100% 단어 노트 & 동시출현 연관성 클러스터 분석:
-        - 90분 슬라이딩 윈도우(30분 간격 중첩)로 경계에 걸친 떡밥도 놓치지 않고 포착
+        - 90분 슬라이딩 윈도우(30분 간격 중첩)로 경계에 걸친 토픽도 놓치지 않고 포착
         - 클러스터 내 실제 첫 글~마지막 글 시각(actual_start ~ actual_end)을 이벤트 시간대로 기록
         """
         if end_dt is None:
@@ -192,13 +192,13 @@ class TopicAnalyzer:
             if eid:
                 saved_events.append((eid, ev["title"]))
                 kw_summary = [f"{k['word']} {k['lift']}x" for k in ev["keywords"][:4]]
-                log("떡밥포착", f"🔥 [이벤트 #{eid}] {ev['title']} ({ev_start.strftime('%H:%M')}~{ev_end.strftime('%H:%M')}, {ev['post_count']}건 / {kw_summary})")
+                log("트렌드포착", f"🔥 [토픽 #{eid}] {ev['title']} ({ev_start.strftime('%H:%M')}~{ev_end.strftime('%H:%M')}, {ev['post_count']}건 / {kw_summary})")
 
         return saved_events
 
     def reset_and_regenerate_24h(self):
-        """기존 떡밥 초기화 후 최근 24시간을 30분 간격(90분 중첩 윈도우)으로 초고속 재구축 (LLM 무사용, ~2초 소요)"""
-        log("재구축", "🧹 기존 떡밥 타임라인 초기화 및 최근 24시간 단어노트 연관성 클러스터 재구축 시작...")
+        """기존 트렌드 초기화 후 최근 24시간을 30분 간격(90분 중첩 윈도우)으로 초고속 재구축 (LLM 무사용, ~2초 소요)"""
+        log("재구축", "🧹 기존 트렌드 타임라인 초기화 및 최근 24시간 단어노트 연관성 클러스터 재구축 시작...")
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("TRUNCATE gallery_events RESTART IDENTITY;")
@@ -216,13 +216,13 @@ class TopicAnalyzer:
             except Exception as e:
                 log("재구축오류", f"{step * 30}분 전 구간 오류: {e}")
 
-        log("재구축", f"🎉 최근 24시간 주요 떡밥 총 {total_created}건 초고속 재구축 완료!")
+        log("재구축", f"🎉 최근 24시간 주요 급상승 토픽 총 {total_created}건 초고속 재구축 완료!")
 
 
 def run_analyzer_loop():
-    """10분 간격 실시간 단어 노트 떡밥 감지 워커 (API 제한 없음)"""
+    """10분 간격 실시간 단어 노트 트렌드 감지 워커 (API 제한 없음)"""
     analyzer = TopicAnalyzer(gallery_id="rescene1")
-    log("떡밥감지기", "🚀 순수 단어노트 & 연관성 덩어리(Cluster) 떡밥 감지 워커 시작 (No-LLM)")
+    log("트렌드감지기", "🚀 순수 단어노트 & 연관성 클러스터 트렌드 감지 워커 시작 (No-LLM)")
 
     analyzer.reset_and_regenerate_24h()
 
@@ -231,7 +231,7 @@ def run_analyzer_loop():
         try:
             analyzer.analyze_window(end_dt=get_now_kst(), window_minutes=90)
         except Exception as e:
-            log("떡밥감지기", f"분석 오류: {e}")
+            log("트렌드감지기", f"분석 오류: {e}")
 
 
 if __name__ == "__main__":

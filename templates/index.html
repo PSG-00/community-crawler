@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>리센느 갤러리 90일 아카이브 & 실시간 떡밥 타임라인</title>
+    <title>리센느 갤러리 90일 아카이브 & 실시간 트렌드 타임라인</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -70,14 +70,14 @@
                     <span>게시글 검색</span>
                 </button>
 
-                <!-- 탭 2: 실시간 떡밥 (50%) -->
+                <!-- 탭 2: 실시간 트렌드 (50%) -->
                 <button type="button" id="tabBtnTopics" onclick="switchMainTab('topics')"
                         class="w-full py-2 sm:py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 {% if active_tab == 'topics' %}bg-white text-indigo-700 shadow-sm font-bold{% else %}text-indigo-200 hover:text-white font-medium{% endif %}">
                     <span class="relative flex h-2 w-2">
                         <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
                         <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
                     </span>
-                    <span>실시간 떡밥</span>
+                    <span>실시간 트렌드</span>
                     {% if recent_topics %}
                     <span class="text-[10px] bg-amber-400 text-indigo-950 font-bold px-1.5 py-0.2 rounded-full font-mono">{{ recent_topics|length }}</span>
                     {% endif %}
@@ -344,7 +344,7 @@
             {% endif %}
         </div>
 
-        <!-- ======================= 2. 실시간 떡밥 타임라인 화면 (TAB 2) ======================= -->
+        <!-- ======================= 2. 실시간 트렌드 타임라인 화면 (TAB 2) ======================= -->
         <div id="viewTopics" class="{% if active_tab != 'topics' %}hidden{% endif %} space-y-3">
             <!-- 타임라인 헤더 -->
             <div class="bg-white rounded-2xl border border-amber-200 p-3.5 sm:p-4 shadow-xs flex items-center justify-between">
@@ -355,11 +355,11 @@
                             <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
                         </span>
                         <h2 class="text-sm sm:text-base font-bold text-slate-900">
-                            실시간 갤러리 떡밥 타임라인
+                            실시간 급상승 토픽 타임라인
                         </h2>
                     </div>
                     <p class="text-[11px] sm:text-xs text-slate-500 mt-0.5 break-keep">
-                        단순 빈도수가 아닌, 24시간 대비 급상승(Z-Score)한 키워드와 동시출현 관계망을 분석한 타임라인입니다.
+                        24시간 대비 급상승한 키워드와 게시글 내 동시출현 연관어를 클러스터링한 트렌드 타임라인입니다.
                     </p>
                 </div>
                 <button type="button" onclick="refreshTopics()" class="shrink-0 text-slate-600 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5">
@@ -380,11 +380,11 @@
                                 <i class="fa-regular fa-clock mr-1"></i>{{ topic.time_display }}
                             </span>
                             <span class="text-[11px] text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200/50">
-                                🔥 {{ topic.post_count }}개 글 집중
+                                🔥 관련 글 {{ topic.post_count }}건
                             </span>
                         </div>
 
-                        <!-- 떡밥 주제 제목 -->
+                        <!-- 토픽 주제 제목 -->
                         <h3 class="text-sm sm:text-base font-bold text-slate-900 mb-1 leading-snug break-keep">
                             {{ topic.title }}
                         </h3>
@@ -396,16 +396,16 @@
                         </div>
                         {% endif %}
 
-                        <!-- AI 요약 본문 -->
+                        <!-- 대표 게시글 목록 -->
                         <div class="text-xs sm:text-sm text-slate-700 leading-relaxed mb-3 bg-slate-50 p-2.5 sm:p-3 rounded-xl border border-slate-100 whitespace-pre-line break-keep">
                             {{ topic.summary }}
                         </div>
                     </div>
 
                     <div>
-                        <!-- 급상승 연관어 칩 (터치 시 해당 떡밥 시간대로 즉시 검색) -->
+                        <!-- 급상승 연관어 칩 (터치 시 해당 토픽 시간대로 즉시 검색) -->
                         <div class="text-[11px] text-slate-400 font-medium mb-1.5">
-                            <span>단어 노트 연관어 (클릭 시 이 떡밥 시간대로 즉시 검색):</span>
+                            <span>주요 연관 키워드 (클릭 시 해당 시간대 즉시 검색):</span>
                         </div>
                         <div class="flex flex-wrap gap-1.5 mb-2.5">
                             {% for kw in topic.keywords %}
@@ -419,26 +419,26 @@
                             {% endfor %}
                         </div>
 
-                        <!-- 떡밥 관련 글 모아보기 버튼 (떡밥 핵심 키워드 다중 통합 + 해당 떡밥 시간대 자동 지정 검색) -->
+                        <!-- 토픽 관련 글 모아보기 버튼 (핵심 키워드 다중 통합 + 해당 시간대 자동 지정 검색) -->
                         {% set topic_search_phrase = topic.keyword_list[:4] | join(' OR ') if topic.keyword_list else '' %}
                         {% set topic_label_phrase = topic.keyword_list[:4] | join(' · ') if topic.keyword_list else '' %}
                         <button type="button" onclick="quickSearchTopic('{{ topic_search_phrase | replace("'", "\\'") }}', '{{ topic.search_start }}', '{{ topic.search_end }}')"
                                 class="w-full bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 text-xs sm:text-sm font-semibold py-2 rounded-xl transition flex items-center justify-center gap-1.5 border border-indigo-200 active:scale-[0.99]"
                                 title="'{{ topic_search_phrase }}' ({{ topic.time_display }}) 관련 글 전체 모아보기">
                             <i class="fa-solid fa-magnifying-glass text-xs"></i>
-                            <span>이 떡밥 시간대 글 모아보기 {% if topic_label_phrase %}<span class="font-normal opacity-85 text-[11px] sm:text-xs">({{ topic_label_phrase }})</span>{% endif %}</span>
+                            <span>이 시간대 관련 글 모아보기 {% if topic_label_phrase %}<span class="font-normal opacity-85 text-[11px] sm:text-xs">({{ topic_label_phrase }})</span>{% endif %}</span>
                         </button>
                     </div>
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <!-- 떡밥 감지 대기 안내 카드 -->
+            <!-- 트렌드 감지 대기 안내 카드 -->
             <div class="text-center py-12 bg-white rounded-2xl border border-dashed border-amber-300 p-6">
-                <i class="fa-solid fa-mug-hot text-amber-400 text-3xl mb-2"></i>
-                <h3 class="text-sm sm:text-base font-bold text-slate-800">현재 감지된 새로운 급상승 떡밥이 없습니다</h3>
+                <i class="fa-solid fa-chart-line text-amber-400 text-3xl mb-2"></i>
+                <h3 class="text-sm sm:text-base font-bold text-slate-800">현재 집계된 급상승 토픽이 없습니다</h3>
                 <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto leading-relaxed break-keep">
-                    최근 24시간 대비 특정 키워드가 폭발(Spike)하면 AI 분석 엔진이 자동으로 떡밥 타임라인에 등록합니다.
+                    최근 24시간 대비 특정 키워드와 연관어 군집이 급증하면 자동으로 트렌드 타임라인에 등록됩니다.
                 </p>
             </div>
             {% endif %}

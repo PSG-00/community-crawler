@@ -70,7 +70,7 @@ def parse_list_page(gallery_id, page=1):
     return posts
 
 def fetch_post_content(gallery_id, post_id):
-    """모바일 상세 페이지 본문 텍스트 추출"""
+    """모바일 상세 페이지 본문 텍스트 추출 (줄바꿈/문단 보존)"""
     url = f"https://m.dcinside.com/board/{gallery_id}/{post_id}"
     h = fetch_html(url, ua=UA_M, timeout=6)
     if not h:
@@ -85,8 +85,13 @@ def fetch_post_content(gallery_id, post_id):
     raw_html = body_m.group(1)
     clean = re.sub(r'<script.*?</script>', '', raw_html, flags=re.DOTALL)
     clean = re.sub(r'<style.*?</style>', '', clean, flags=re.DOTALL)
+    # 줄바꿈 및 문단 태그 보존
+    clean = re.sub(r'<br\s*/?>', '\n', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'</?(p|div)[^>]*>', '\n', clean, flags=re.IGNORECASE)
     text = html.unescape(re.sub(r'<[^>]+>', ' ', clean))
-    return re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n\s*\n+', '\n\n', text)
+    return text.strip()
 
 def save_metadata_batch(records):
     """100건 단위 초고속 배치 저장"""

@@ -3,22 +3,36 @@ import html
 import re
 from typing import Optional
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from database import get_db
 
 app = FastAPI(title="DC Inside Community 60-Day Archive Search")
 templates = Jinja2Templates(directory="templates")
 
-def highlight_keywords(text: str, keywords: list) -> str:
-    """검색어들에 <mark> 태그 적용 및 스니펫 추출"""
+def highlight_keywords_in_text(text: str, keywords: list) -> str:
+    """텍스트 내 모든 키워드에 <mark> 하이라이팅 적용 (줄바꿈 보존)"""
     if not text:
         return ""
-    escaped_text = html.escape(text)
-    
+    escaped = html.escape(text)
     valid_kws = [html.escape(k.strip()) for k in keywords if k and len(k.strip()) >= 2]
+    for kw in valid_kws:
+        pattern = re.compile(re.escape(kw), re.IGNORECASE)
+        escaped = pattern.sub(r'<mark class="bg-amber-300 text-black px-1 rounded font-bold">\g<0></mark>', escaped)
+    # 줄바꿈 태그 변환
+    return escaped.replace("\n", "<br>")
+
+def generate_snippet(text: str, keywords: list) -> str:
+    """검색어 주변 150자 내외 발췌 스니펫 추출"""
+    if not text:
+        return ""
+    # 연속 줄바꿈 제거 후 단일 라인으로 스니펫 생성
+    single_line = re.sub(r'\s+', ' ', text).strip()
+    escaped_text = html.escape(single_line)
+    valid_kws = [html.escape(k.strip()) for k in keywords if k and len(k.strip()) >= 2]
+
     if not valid_kws:
-        return escaped_text[:180] + ("..." if len(escaped_text) > 180 else "")
+        return escaped_text[:160] + ("..." if len(escaped_text) > 160 else "")
 
     first_pos = len(escaped_text)
     for kw in valid_kws:
@@ -27,11 +41,11 @@ def highlight_keywords(text: str, keywords: list) -> str:
             first_pos = pos
 
     if first_pos != len(escaped_text):
-        start = max(0, first_pos - 50)
+        start = max(0, first_pos - 40)
         end = min(len(escaped_text), first_pos + 120)
         snippet = ("..." if start > 0 else "") + escaped_text[start:end] + ("..." if end < len(escaped_text) else "")
     else:
-        snippet = escaped_text[:180] + ("..." if len(escaped_text) > 180 else "")
+        snippet = escaped_text[:160] + ("..." if len(escaped_text) > 160 else "")
 
     for kw in valid_kws:
         pattern = re.compile(re.escape(kw), re.IGNORECASE)
@@ -138,12 +152,15 @@ def execute_search(
 
         for r in rows:
             p_id, gall, title, content, nick, code, dt = r
+            raw_content = content or ""
             results.append({
                 "post_id": p_id,
                 "url": f"https://gall.dcinside.com/mgallery/board/view/?id={gall}&no={p_id}",
-                "title": highlight_keywords(title, highlight_list),
-                "content_snippet": highlight_keywords(content, highlight_list),
-                "nickname": highlight_keywords(nick, [keyword] if target == "nickname" else []),
+                "title": highlight_keywords_in_text(title, highlight_list),
+                "content_snippet": generate_snippet(raw_content, highlight_list),
+                "full_content": highlight_keywords_in_text(raw_content, highlight_list),
+                "has_content": bool(raw_content.strip()),
+                "nickname": highlight_keywords_in_text(nick, [keyword] if target == "nickname" else []),
                 "author_code": code,
                 "created_at": dt.strftime("%Y-%m-%d %H:%M")
             })

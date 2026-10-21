@@ -176,24 +176,52 @@
         </div>
         {% endif %}
 
-        <!-- Results List (무한 스크롤 컨테이너) -->
+        <!-- Results List (아카이브 본문 펼치기 카드) -->
         {% if results %}
-        <div id="resultsContainer" class="space-y-2.5">
+        <div id="resultsContainer" class="space-y-3">
             {% for item in results %}
-            <div class="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4 hover:border-indigo-400 transition shadow-2xs">
-                <div class="flex items-start justify-between gap-2 mb-1.5">
-                    <a href="{{ item.url }}" target="_blank" class="text-base font-bold text-indigo-900 hover:text-indigo-600 hover:underline leading-snug">
+            <div id="card-{{ item.post_id }}" class="bg-white rounded-2xl border border-slate-200 p-4 hover:border-indigo-400 transition shadow-2xs">
+                <!-- 카드 상단: 제목 & 원본글 버튼 -->
+                <div class="flex items-start justify-between gap-3 mb-2">
+                    <button type="button" onclick="togglePostContent('{{ item.post_id }}')" class="text-left text-base sm:text-lg font-bold text-indigo-950 hover:text-indigo-600 transition leading-snug flex-1">
                         {{ item.title | safe }}
+                    </button>
+                    <a href="{{ item.url }}" target="_blank" class="shrink-0 bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-600 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 transition flex items-center gap-1" title="디시인사이드 원본 글로 이동">
+                        <span>원문</span>
+                        <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
                     </a>
-                    <span class="text-xs text-slate-400 shrink-0 mt-0.5">#{{ item.post_id }}</span>
                 </div>
 
+                <!-- 1. 본문 축약 미리보기 (클릭하면 펼쳐짐) -->
                 {% if item.content_snippet %}
-                <p class="text-xs sm:text-sm text-slate-600 leading-relaxed mb-2 line-clamp-2">
+                <div id="snippet-{{ item.post_id }}" onclick="togglePostContent('{{ item.post_id }}')" class="cursor-pointer text-xs sm:text-sm text-slate-600 leading-relaxed mb-3 line-clamp-2 hover:text-slate-900 transition">
                     {{ item.content_snippet | safe }}
-                </p>
+                </div>
                 {% endif %}
 
+                <!-- 2. 본문 전체 펼침 영역 (아카이브 전체 읽기) -->
+                <div id="full-{{ item.post_id }}" class="hidden my-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 leading-relaxed max-h-[500px] overflow-y-auto">
+                    {% if item.has_content %}
+                    <div class="mb-3">
+                        {{ item.full_content | safe }}
+                    </div>
+                    {% else %}
+                    <div class="text-slate-400 italic mb-3">
+                        (본문 텍스트가 없거나 이미지 전용 글입니다)
+                    </div>
+                    {% endif %}
+                    <div class="flex justify-between items-center pt-2 border-t border-slate-200/60 text-xs">
+                        <a href="{{ item.url }}" target="_blank" class="text-indigo-600 font-semibold hover:underline flex items-center gap-1">
+                            <span>디시인사이드 원본 글 보기</span>
+                            <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                        </a>
+                        <button type="button" onclick="togglePostContent('{{ item.post_id }}')" class="text-slate-400 hover:text-slate-600">
+                            접기 ▲
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 카드 하단 정보 -->
                 <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 gap-1.5">
                     <div class="flex items-center space-x-1.5">
                         <span class="font-medium text-slate-700">{{ item.nickname | safe }}</span>
@@ -203,8 +231,11 @@
                         </a>
                         {% endif %}
                     </div>
-                    <div>
-                        <i class="fa-regular fa-clock mr-1"></i>{{ item.created_at }}
+                    <div class="flex items-center gap-3">
+                        <button type="button" onclick="togglePostContent('{{ item.post_id }}')" id="toggleBtn-{{ item.post_id }}" class="text-indigo-600 font-medium hover:underline text-xs">
+                            본문 보기 ▼
+                        </button>
+                        <span><i class="fa-regular fa-clock mr-1"></i>{{ item.created_at }}</span>
                     </div>
                 </div>
             </div>
@@ -246,9 +277,9 @@
                 <strong>최근 2달(60일) 동안 올라온 모든 글</strong>을 보관하고 무제한 검색을 제공합니다.
             </p>
             <div class="mt-4 flex flex-wrap justify-center gap-2 text-xs text-slate-400">
+                <span class="bg-slate-100 px-2.5 py-1 rounded-full">📖 카드 터치 시 본문 전체 읽기</span>
+                <span class="bg-slate-100 px-2.5 py-1 rounded-full">↗ 원문 보기 별도 지원</span>
                 <span class="bg-slate-100 px-2.5 py-1 rounded-full">✨ 무한 스크롤 탐색</span>
-                <span class="bg-slate-100 px-2.5 py-1 rounded-full">📅 60일 날짜 필터링</span>
-                <span class="bg-slate-100 px-2.5 py-1 rounded-full">🔍 식별코드 / 결과 내 재검색</span>
             </div>
         </div>
         {% endif %}
@@ -270,6 +301,25 @@
             }
         }
 
+        // 본문 전체 펼치기 / 접기 토글
+        function togglePostContent(postId) {
+            const fullBox = document.getElementById(`full-${postId}`);
+            const snippetBox = document.getElementById(`snippet-${postId}`);
+            const toggleBtn = document.getElementById(`toggleBtn-${postId}`);
+
+            if (!fullBox) return;
+
+            if (fullBox.classList.contains('hidden')) {
+                fullBox.classList.remove('hidden');
+                if (snippetBox) snippetBox.classList.add('hidden');
+                if (toggleBtn) toggleBtn.innerText = '본문 접기 ▲';
+            } else {
+                fullBox.classList.add('hidden');
+                if (snippetBox) snippetBox.classList.remove('hidden');
+                if (toggleBtn) toggleBtn.innerText = '본문 보기 ▼';
+            }
+        }
+
         // ================= 무한 스크롤 구현 (IntersectionObserver) =================
         let currentPage = 1;
         let hasNext = {{ 'true' if has_next else 'false' }};
@@ -287,20 +337,44 @@
 
         function renderCard(item) {
             return `
-            <div class="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4 hover:border-indigo-400 transition shadow-2xs">
-                <div class="flex items-start justify-between gap-2 mb-1.5">
-                    <a href="${item.url}" target="_blank" class="text-base font-bold text-indigo-900 hover:text-indigo-600 hover:underline leading-snug">
+            <div id="card-${item.post_id}" class="bg-white rounded-2xl border border-slate-200 p-4 hover:border-indigo-400 transition shadow-2xs">
+                <div class="flex items-start justify-between gap-3 mb-2">
+                    <button type="button" onclick="togglePostContent('${item.post_id}')" class="text-left text-base sm:text-lg font-bold text-indigo-950 hover:text-indigo-600 transition leading-snug flex-1">
                         ${item.title}
+                    </button>
+                    <a href="${item.url}" target="_blank" class="shrink-0 bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-600 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 transition flex items-center gap-1" title="디시인사이드 원본 글로 이동">
+                        <span>원문</span>
+                        <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
                     </a>
-                    <span class="text-xs text-slate-400 shrink-0 mt-0.5">#${item.post_id}</span>
                 </div>
-                ${item.content_snippet ? `<p class="text-xs sm:text-sm text-slate-600 leading-relaxed mb-2 line-clamp-2">${item.content_snippet}</p>` : ''}
+
+                ${item.content_snippet ? `
+                <div id="snippet-${item.post_id}" onclick="togglePostContent('${item.post_id}')" class="cursor-pointer text-xs sm:text-sm text-slate-600 leading-relaxed mb-3 line-clamp-2 hover:text-slate-900 transition">
+                    ${item.content_snippet}
+                </div>` : ''}
+
+                <div id="full-${item.post_id}" class="hidden my-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 leading-relaxed max-h-[500px] overflow-y-auto">
+                    ${item.has_content ? `<div class="mb-3">${item.full_content}</div>` : '<div class="text-slate-400 italic mb-3">(본문 텍스트가 없거나 이미지 전용 글입니다)</div>'}
+                    <div class="flex justify-between items-center pt-2 border-t border-slate-200/60 text-xs">
+                        <a href="${item.url}" target="_blank" class="text-indigo-600 font-semibold hover:underline flex items-center gap-1">
+                            <span>디시인사이드 원본 글 보기</span>
+                            <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                        </a>
+                        <button type="button" onclick="togglePostContent('${item.post_id}')" class="text-slate-400 hover:text-slate-600">접기 ▲</button>
+                    </div>
+                </div>
+
                 <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 gap-1.5">
                     <div class="flex items-center space-x-1.5">
                         <span class="font-medium text-slate-700">${item.nickname}</span>
                         ${item.author_code ? `<a href="/?q=${encodeURIComponent(item.author_code)}&target=code" class="bg-slate-100 hover:bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-mono transition">(${item.author_code})</a>` : ''}
                     </div>
-                    <div><i class="fa-regular fa-clock mr-1"></i>${item.created_at}</div>
+                    <div class="flex items-center gap-3">
+                        <button type="button" onclick="togglePostContent('${item.post_id}')" id="toggleBtn-${item.post_id}" class="text-indigo-600 font-medium hover:underline text-xs">
+                            본문 보기 ▼
+                        </button>
+                        <span><i class="fa-regular fa-clock mr-1"></i>${item.created_at}</span>
+                    </div>
                 </div>
             </div>`;
         }

@@ -234,7 +234,7 @@ def execute_search(
 
 KST = timezone(timedelta(hours=9))
 
-def get_recent_topics(limit: int = 8):
+def get_recent_topics(limit: int = 16):
     """실시간 떡밥 타임라인 이벤트 조회"""
     try:
         with get_db() as conn:

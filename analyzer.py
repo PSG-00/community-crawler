@@ -120,7 +120,7 @@ class TopicAnalyzer:
         return t
 
     def tokenize(self, text):
-        """텍스트에서 유효 명사/외래어/신조어만 추출 (2글자 이상, 노이즈 제외)"""
+        """텍스트에서 유효 명사/외래어/신조어 추출 및 공백 없이 붙은 복합명사 자동 결합"""
         if not text:
             return []
         cleaned = self.clean_text(text)
@@ -128,10 +128,30 @@ class TopicAnalyzer:
         try:
             tokens = kiwi.tokenize(cleaned)
             words = []
+            curr_word = ""
+            curr_end = -1
+
             for t in tokens:
-                # 영어 알파벳 잔재(SL) 제외하고 유효 한국어 명사 및 신조어만 추출
-                if t.tag in ('NNG', 'NNP', 'XR') and len(t.form) >= 2 and t.form not in STOPWORDS:
-                    words.append(t.form)
+                # 명사 계열 및 접두사성 토큰 자동 결합 판정
+                if t.tag in ('NNG', 'NNP', 'XR') or (t.tag == 'NP' and t.form in ('우리',)):
+                    # 원문에서 띄어쓰기 없이 바로 붙어있으면 자동으로 한 단어로 결합 (예: 우리+은행 -> 우리은행, 체크+카드 -> 체크카드)
+                    if curr_word and t.start == curr_end:
+                        curr_word += t.form
+                        curr_end = t.start + t.len
+                    else:
+                        if curr_word and len(curr_word) >= 2 and curr_word not in STOPWORDS:
+                            words.append(curr_word)
+                        curr_word = t.form
+                        curr_end = t.start + t.len
+                else:
+                    if curr_word and len(curr_word) >= 2 and curr_word not in STOPWORDS:
+                        words.append(curr_word)
+                    curr_word = ""
+                    curr_end = -1
+
+            if curr_word and len(curr_word) >= 2 and curr_word not in STOPWORDS:
+                words.append(curr_word)
+
             return words
         except Exception:
             return []

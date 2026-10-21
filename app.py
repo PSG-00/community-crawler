@@ -241,7 +241,8 @@ def index(
     sub_target: str = Query("all"),
     period: str = Query("all"),
     start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None)
+    end_date: Optional[str] = Query(None),
+    tab: str = Query("search")
 ):
     search_data = execute_search(
         q=q, target=target, sub_q=sub_q, sub_target=sub_target,
@@ -253,7 +254,7 @@ def index(
             cur.execute("SELECT COUNT(*) FROM dc_posts")
             db_total_posts = cur.fetchone()[0]
 
-    recent_topics = get_recent_topics(limit=8)
+    recent_topics = get_recent_topics(limit=12)
 
     return templates.TemplateResponse(
         request=request,
@@ -266,6 +267,7 @@ def index(
             "period": period,
             "start_date": start_date or "",
             "end_date": end_date or "",
+            "active_tab": tab if tab in ("search", "topics") else "search",
             "results": search_data["results"],
             "total_count": search_data["total_count"],
             "elapsed_ms": search_data["elapsed_ms"],

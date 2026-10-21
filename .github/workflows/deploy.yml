@@ -1,0 +1,22 @@
+name: Deploy Community Crawler
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Deploy Verification
+        run: |
+          echo "=========================================="
+          echo "🚀 EC2에 코드가 성공적으로 자동 배포되었습니다!"
+          echo "서버 호스트: $(hostname)"
+          echo "현재 시간: $(date)"
+          python3 --version
+          echo "=========================================="

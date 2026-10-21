@@ -302,24 +302,31 @@ class TopicAnalyzer:
             "Content-Type": "application/json",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
         }
-        prompt = f"""당신은 아이돌 커뮤니티(디시인사이드 리센느 갤러리) 트렌드 분석가입니다.
+        prompt = f"""당신은 디시인사이드 아이돌 갤러리의 유쾌하고 눈치 빠른 트렌드 요약 봇입니다.
 시간대: {time_range_str}
 급상승 핵심 키워드: {', '.join(keywords[:7])}
 해당 시간대 대표 게시글 제목들:
 {chr(10).join(['- ' + t for t in sample_titles])}
 
-위 데이터를 바탕으로 커뮤니티에서 어떤 화제/떡밥이 있었는지 다음 JSON 포맷으로 작성하세요:
+[★ 작성 시 절대 주의사항]
+1. 과도한 진지충 / 사회 뉴스 기사체 절대 금지:
+   - 갤러들이 장난치며 노는 것(예: 유튜브 검색기록 공유, 밈, 사진 인증, 주접 등)을 보고 '개인정보 유출', '프라이버시 우려', '보안 위협', '논란' 같은 심각한 사회 뉴스식 억측과 오버해석을 절대로 하지 마세요!
+   - 갤러들의 실제 행동과 놀이 의도 그대로 유쾌하고 생생하게 파악하세요. (예: "검색기록 유출 우려" ❌ -> "유튜브 검색기록 까기 릴레이 유행" ⭕)
+2. 디시 갤러리 특유의 가볍고 재미있는 톤 유지:
+   - 팬덤의 덕질, 주접, 웃긴 릴레이, 떡밥 반응을 친근하고 생동감 있게 요약하세요.
+
+위 데이터를 바탕으로 다음 JSON 포맷으로 작성하세요:
 {{
-  "title": "주요 화제를 포착한 매력적인 한 줄 제목 (20자 내외)",
-  "summary": "핵심 전말과 이유를 담은 2~3줄 요약 (글머리 기호 • 사용)",
-  "mood": "분위기를 나타내는 해시태그 2~3개 (예: #비주얼 #직캠 #감탄)"
+  "title": "갤러리 분위기를 직관적으로 살린 생생한 한 줄 제목 (20자 내외)",
+  "summary": "갤러들이 왜 모여서 이 이야기를 하고 있는지 유쾌하고 정확한 2~3줄 요약 (글머리 기호 • 사용)",
+  "mood": "실제 커뮤니티 분위기를 담은 해시태그 2~3개 (예: #인증릴레이 #꿀잼 #주접)"
 }}
-반드시 마크다운 코드블록 없이 순수 JSON 객체로만 응답하세요."""
+반드시 마크다운 없이 순수 JSON 객체로만 응답하세요."""
 
         payload = {
             "model": self.groq_model,
             "messages": [
-                {"role": "system", "content": "아이돌 커뮤니티 트렌드 분석 전문가. 한국어로 JSON 응답."},
+                {"role": "system", "content": "디시인사이드 팬 갤러리 트렌드 요약봇. 진지한 뉴스체 금지. 유쾌하고 생생한 커뮤니티 톤앤매너 유지. 한국어로 JSON 응답."},
                 {"role": "user", "content": prompt}
             ],
             "response_format": {"type": "json_object"},
@@ -346,21 +353,26 @@ class TopicAnalyzer:
         """Google Gemini API를 통한 고품질 요약 (최대 10초 타임아웃)"""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.gemini_api_key}"
         
-        prompt = f"""
-당신은 아이돌 커뮤니티(디시인사이드 리센느 갤러리) 트렌드 분석가입니다.
+        prompt = f"""당신은 디시인사이드 아이돌 갤러리의 유쾌하고 눈치 빠른 트렌드 요약 봇입니다.
 시간대: {time_range_str}
 급상승 핵심 키워드: {', '.join(keywords[:7])}
 해당 시간대 대표 게시글 제목들:
 {chr(10).join(['- ' + t for t in sample_titles])}
 
-위 데이터를 바탕으로 커뮤니티에서 어떤 화제/떡밥이 있었는지 다음 JSON 포맷으로 작성하세요:
+[★ 작성 시 절대 주의사항]
+1. 과도한 진지충 / 사회 뉴스 기사체 절대 금지:
+   - 갤러들이 장난치며 노는 것(예: 유튜브 검색기록 공유, 밈, 사진 인증, 주접 등)을 보고 '개인정보 유출', '프라이버시 우려', '보안 위협', '논란' 같은 심각한 사회 뉴스식 억측과 오버해석을 절대로 하지 마세요!
+   - 갤러들의 실제 행동과 놀이 의도 그대로 유쾌하고 생생하게 파악하세요. (예: "검색기록 유출 우려" ❌ -> "유튜브 검색기록 까기 릴레이 유행" ⭕)
+2. 디시 갤러리 특유의 가볍고 재미있는 톤 유지:
+   - 팬덤의 덕질, 주접, 웃긴 릴레이, 떡밥 반응을 친근하고 생동감 있게 요약하세요.
+
+위 데이터를 바탕으로 다음 JSON 포맷으로 작성하세요:
 {{
-  "title": "주요 화제를 포착한 매력적인 한 줄 제목 (20자 내외)",
-  "summary": "핵심 전말과 이유를 담은 2~3줄 요약 (글머리 기호 • 사용)",
-  "mood": "분위기를 나타내는 해시태그 2~3개 (예: #비주얼 #직캠 #감탄)"
+  "title": "갤러리 분위기를 직관적으로 살린 생생한 한 줄 제목 (20자 내외)",
+  "summary": "갤러들이 왜 모여서 이 이야기를 하고 있는지 유쾌하고 정확한 2~3줄 요약 (글머리 기호 • 사용)",
+  "mood": "실제 커뮤니티 분위기를 담은 해시태그 2~3개 (예: #인증릴레이 #꿀잼 #주접)"
 }}
-반드시 마크다운 없이 순수 JSON만 응답하세요.
-"""
+반드시 마크다운 없이 순수 JSON 객체로만 응답하세요."""
         req_data = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.4}
@@ -478,7 +490,7 @@ class TopicAnalyzer:
         try:
             with get_db() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("DELETE FROM gallery_events WHERE post_count < 8 OR window_end < %s - INTERVAL '12 hours'", (get_now_kst(),))
+                    cur.execute("DELETE FROM gallery_events WHERE post_count < 8 OR topic_summary LIKE '%프라이버시%' OR topic_summary LIKE '%유출%' OR window_end < %s - INTERVAL '12 hours'", (get_now_kst(),))
                     deleted = cur.rowcount
                 conn.commit()
             if deleted > 0:

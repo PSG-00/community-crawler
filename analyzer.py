@@ -37,10 +37,17 @@ class TopicAnalyzer:
                 return cur.fetchall()
 
     def save_event(self, start_dt, end_dt, cluster_id, event_info):
-        """gallery_events 테이블에 저장 (인접/중첩 구간 동일 떡밥 자동 병합 및 실제 발생 시간대 반영)"""
+        """
+        gallery_events 테이블에 저장:
+        - 서로 다른 토픽이 억지로 합쳐지지 않도록 45분 이내 인접 구간이면서
+          '1순위 핵심 키워드(Anchor)'가 같거나 어근이 같은 경우에만 병합!
+        - 병합 시 다른 토픽 키워드가 눈덩이처럼 누적되지 않도록 피크 구간의 깔끔한 키워드 세트를 유지
+        """
         kw_json = json.dumps(event_info["keywords"], ensure_ascii=False)
-        kw_names = {k["word"] for k in event_info["keywords"]}
-        top_word = event_info["keywords"][0]["word"] if event_info["keywords"] else ""
+        core_names = [k["word"] for k in event_info["keywords"] if not k.get("is_assoc")]
+        if not core_names:
+            core_names = [k["word"] for k in event_info["keywords"]]
+        top_word = core_names[0] if core_names else ""
 
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -48,8 +55,8 @@ class TopicAnalyzer:
                     SELECT event_id, keywords, post_count, window_start, window_end, sample_post_ids
                     FROM gallery_events
                     WHERE gallery_id = %s
-                      AND window_end >= %s - INTERVAL '3 hours'
-                      AND window_start <= %s + INTERVAL '3 hours'
+                      AND window_end >= %s - INTERVAL '45 minutes'
+                      AND window_start <= %s + INTERVAL '45 minutes'
                     ORDER BY event_id DESC
                 """, (self.gallery_id, start_dt, end_dt))
                 existing = cur.fetchall()
@@ -60,24 +67,28 @@ class TopicAnalyzer:
                             old_kws = json.loads(old_kws)
                         except Exception:
                             old_kws = []
-                    old_names = {k["word"] if isinstance(k, dict) else str(k) for k in old_kws}
-                    intersect = len(kw_names & old_names)
-                    old_top = (
-                        old_kws[0]["word"]
-                        if (old_kws and isinstance(old_kws[0], dict))
-                        else (old_kws[0] if old_kws else "")
-                    )
+                    old_core = [
+                        (k["word"] if isinstance(k, dict) else str(k))
+                        for k in old_kws
+                        if not (isinstance(k, dict) and k.get("is_assoc"))
+                    ]
+                    if not old_core:
+                        old_core = [k["word"] if isinstance(k, dict) else str(k) for k in old_kws]
+                    old_top = old_core[0] if old_core else ""
 
-                    is_same_topic = (
-                        (top_word and top_word in old_names)
-                        or (old_top and old_top in kw_names)
-                        or intersect >= 2
-                        or any(
-                            len(w1) >= 2 and len(w2) >= 2 and (w1 in w2 or w2 in w1)
-                            for w1 in list(kw_names)[:2]
-                            for w2 in list(old_names)[:2]
-                        )
-                    )
+                    # 핵심어(Core keywords)나 주요 연관어가 겹치거나, 어근 포함관계(우이은행<->우리은행)일 때 동일 토픽으로 병합
+                    all_new_words = {k["word"] for k in event_info["keywords"]}
+                    all_old_words = {k["word"] if isinstance(k, dict) else str(k) for k in old_kws}
+                    is_same_topic = False
+                    if top_word and old_top:
+                        if top_word == old_top:
+                            is_same_topic = True
+                        elif len(top_word) >= 2 and len(old_top) >= 2 and (top_word in old_top or old_top in top_word):
+                            is_same_topic = True
+                        elif (top_word in all_old_words) or (old_top in all_new_words):
+                            is_same_topic = True
+                        elif len(set(core_names[:3]) & set(old_core[:3])) >= 2:
+                            is_same_topic = True
 
                     if is_same_topic:
                         new_start = min(old_w_start, start_dt)
@@ -87,21 +98,6 @@ class TopicAnalyzer:
                             reverse=True,
                         )[:60]
                         new_cnt = max(old_cnt, event_info["post_count"], len(merged_pids))
-
-                        # 키워드 병합 (피크 구간의 키워드 우선 + 누락된 연관 키워드 추가)
-                        if event_info["post_count"] >= old_cnt:
-                            base_kws, extra_kws = event_info["keywords"], old_kws
-                        else:
-                            base_kws, extra_kws = old_kws, event_info["keywords"]
-
-                        merged_kws = list(base_kws)
-                        seen_w = {k["word"] if isinstance(k, dict) else str(k) for k in merged_kws}
-                        for k in extra_kws:
-                            w = k["word"] if isinstance(k, dict) else str(k)
-                            if w not in seen_w and len(merged_kws) < 6:
-                                seen_w.add(w)
-                                merged_kws.append(k)
-                        merged_kw_json = json.dumps(merged_kws, ensure_ascii=False)
 
                         if event_info["post_count"] >= old_cnt:
                             cur.execute("""
@@ -118,7 +114,7 @@ class TopicAnalyzer:
                             """, (
                                 new_start, new_end, new_cnt,
                                 event_info["title"], event_info["summary"], event_info["mood"],
-                                merged_kw_json, merged_pids, eid
+                                kw_json, merged_pids, eid
                             ))
                         else:
                             cur.execute("""
@@ -126,10 +122,9 @@ class TopicAnalyzer:
                                 SET window_start = %s,
                                     window_end = %s,
                                     post_count = %s,
-                                    keywords = %s,
                                     sample_post_ids = %s
                                 WHERE event_id = %s
-                            """, (new_start, new_end, new_cnt, merged_kw_json, merged_pids, eid))
+                            """, (new_start, new_end, new_cnt, merged_pids, eid))
                         conn.commit()
                         log("분석기", f"기존 토픽 #{eid} ('{top_word}') 병합 ({new_start.strftime('%H:%M')}~{new_end.strftime('%H:%M')}, {new_cnt}건)")
                         return None

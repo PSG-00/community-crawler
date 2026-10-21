@@ -29,6 +29,13 @@ _GENERIC = {
     "보니까", "봤는데", "보는", "보고", "할까", "해야", "되나", "되는", "된다", "맞음", "맞냐", "아님", "아니라",
     "총공", "스밍", "투표", "출석", "출첵", "총공자", "오이쉬", "오이쉬에", "야호",
     "생일시", "멤버시", "중간시", "대장시", "경은시", "리브시", "미남시", "미나미시", "까엉시", "제나시", "메이시", "예빈시", "원이시",
+    "새로고침", "머야", "오늘도", "앞에서", "있는데", "아니라", "진짜로", "어제자", "지금까지", "하는거", "같은데",
+}
+
+# 갤러리 상시 소재 (멤버명/버블/갤벤 등): 단독이나 보조 연관어는 될 수 있어도, 서로 다른 두 떡밥을 이어주는 '다리(Bridge)'가 되면 안 되는 단어들
+_BRIDGE_STOPWORDS = {
+    "버블", "갤벤", "겔벤", "갸루벤", "공지", "끌올", "당발", "당첨",
+    "원이", "대장", "리브", "리부", "경은", "진경은", "미나미", "미남", "메이", "예빈", "이예빈", "제나", "까엉", "가영",
 }
 
 _URL_RE = re.compile(r'https?://\S+|www\.\S+|\S+\.(com|net|org|kr|be|me|io|ly)\S*', re.I)
@@ -85,8 +92,9 @@ def is_ritual_title(title):
 
 
 def extract_words(title, content=""):
-    """게시글 1개의 [단어 노트] 생성: 점 찍힌 단어 복원 + 어절 분리 + 조사 제거"""
-    text = f"{title or ''} {(content or '')[:250] if content and content != '__EMPTY__' else ''}"
+    """게시글 1개의 [단어 노트] 생성: 점 찍힌 단어 복원 + 어절 분리 + 조사 제거 (본문 하단 잡담 오염 방지를 위해 제목+본문 첫 80자만 사용)"""
+    clean_content = (content or "")[:80] if content and content != "__EMPTY__" else ""
+    text = f"{title or ''} {clean_content}"
     text = _URL_RE.sub(" ", text)
     text = _INTER_PUNCT_RE.sub("", text)
     text = _CLEAN_RE.sub(" ", text)
@@ -128,44 +136,41 @@ def merge_prefix_family(cands):
     return cands
 
 
-def _are_words_related(c1, c2, post_notes):
+def _are_words_strongly_related(c1, c2):
     """
-    두 급상승 단어 후보가 같은 떡밥 덩어리인지 판정하는 3가지 고리:
-    1) 게시글 공유(동시출현): 같은 게시글의 단어 노트에 2번 이상 함께 등장하거나 겹침률 >= 18%
-    2) 어근/접미사/은어 변형:
-       - 한쪽이 다른 쪽으로 끝나거나 시작함 (예: 우이은행 <-> 은행, 우리은행 <-> 은행, 검색기록 <-> 기록)
-       - 4글자 이상에서 1글자만 다른 은어 변형 (예: 우리은행 <-> 우이은행)
-       - 공통 2글자 이상 어미/어근 공유 (예: 1호선 <-> 2호선 <-> 4호선, 슈붕 <-> 팥붕 <-> 붕어빵)
-    3) 단어 노트 문맥 공유: 두 단어가 들어간 게시글들의 단어 노트 상위 연관어가 겹침
+    두 급상승 단어가 '정말로 같은 토픽'인지 엄격하게 판정 (억지 병합 및 다리 연결 방지):
+    1) 글자 뿌리 / 은어 변형 (예: 우이은행 <-> 우리은행 <-> 은행, 검색기록 <-> 기록, 1호선 <-> 2호선, 슈붕 <-> 팥붕 <-> 붕어빵)
+    2) 높은 게시글 동시출현 비율:
+       - 두 단어가 같은 게시글에 최소 3건 이상 함께 등장하면서,
+       - 작은 쪽 게시글의 30% 이상(또는 Jaccard >= 20%)이 겹칠 때만 같은 토픽으로 묶음!
+       - 단, 멤버 이름이나 '버블/갤벤' 같은 상시어(_BRIDGE_STOPWORDS)는 어근 변형이 아닌 이상 다른 고유 토픽과 합치지 않음.
     """
     w1, w2 = c1["word"], c2["word"]
     pids1, pids2 = c1["post_ids"], c2["post_ids"]
-
-    # 고리 1: 직접 게시글 공유
     inter = len(pids1 & pids2)
     min_len = max(1, min(len(pids1), len(pids2)))
-    if inter >= 2 or (inter / min_len) >= 0.18:
-        return True
+    union_len = max(1, len(pids1 | pids2))
 
-    # 고리 2: 글자 뿌리 / 은어 변형
+    # 고리 1: 글자 뿌리 / 은어 변형
     short, long = (w1, w2) if len(w1) <= len(w2) else (w2, w1)
     if len(short) >= 2 and (long.startswith(short) or long.endswith(short)):
         return True
     if len(w1) == len(w2) and len(w1) >= 4 and sum(a != b for a, b in zip(w1, w2)) == 1:
         return True
-    # 공통 접미사 2글자 이상 (예: 1호선/2호선/4호선 -> '호선')
-    if len(w1) >= 3 and len(w2) >= 3 and w1[-2:] == w2[-2:]:
+    # 공통 접미사 2글자 이상 (예: 1호선/2호선/4호선 -> '호선', 핫걸단/큣걸단 -> '걸단')
+    if len(w1) >= 3 and len(w2) >= 3 and w1[-2:] == w2[-2:] and inter >= 1:
         return True
-    # '붕어빵' <-> '슈붕'/'팥붕' 처럼 특수 줄임말이 1건이라도 같이 쓰였거나 공통 글자+문맥 공유
+    # '붕어빵' <-> '슈붕'/'팥붕' 처럼 특수 줄임말이 같이 쓰이면서 글자를 공유할 때
     if inter >= 1 and (short[0] in long or short[-1] in long):
         return True
 
-    # 고리 3: 단어 노트 주변 연관어(Context) 공유
-    ctx1 = Counter(w for pid in pids1 for w in post_notes.get(pid, ()) if w != w1)
-    ctx2 = Counter(w for pid in pids2 for w in post_notes.get(pid, ()) if w != w2)
-    top1 = {w for w, cnt in ctx1.most_common(6) if cnt >= 2}
-    top2 = {w for w, cnt in ctx2.most_common(6) if cnt >= 2}
-    if (w2 in top1) or (w1 in top2) or len(top1 & top2) >= 2:
+    # 상시어(멤버 이름, 버블, 갤벤 등)가 다른 독립 토픽(반바지, 성대모사, 방탈출 등)을 흡수하지 못하도록 차단
+    if (w1 in _BRIDGE_STOPWORDS) != (w2 in _BRIDGE_STOPWORDS):
+        if (inter / min_len) < 0.55 or inter < 4:
+            return False
+
+    # 고리 2: 엄격한 직접 게시글 동시출현 (최소 3건 이상 + 작은 쪽의 32% 이상 또는 전체의 20% 이상 공유)
+    if inter >= 3 and ((inter / min_len) >= 0.32 or (inter / union_len) >= 0.20):
         return True
 
     return False
@@ -267,33 +272,36 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
     if not cands:
         return []
 
-    # 연관성 그래프 연결 요소(Connected Components)로 급상승 후보들을 덩어리로 묶기
+    # Star-Clustering (중심축 직접 연결 방식):
+    # A-B가 연결되고 B-C가 연결되었다고 해서 A-B-C를 다리 건너 합치지 않고,
+    # 점수가 가장 높은 중심 단어(Anchor)와 '직접' 강하게 연결된 단어들만 한 클러스터로 묶는다!
+    cands.sort(key=lambda x: (x["word"] not in _BRIDGE_STOPWORDS, x["score"], x["doc_count"]), reverse=True)
     n = len(cands)
-    adj = defaultdict(set)
-    for i in range(n):
-        for j in range(i + 1, n):
-            if _are_words_related(cands[i], cands[j], post_notes):
-                adj[i].add(j)
-                adj[j].add(i)
-
-    visited = set()
+    used = set()
     clusters = []
-    for i in range(n):
-        if i in visited:
-            continue
-        comp = []
-        queue = [i]
-        visited.add(i)
-        while queue:
-            curr = queue.pop(0)
-            comp.append(cands[curr])
-            for nxt in adj[curr]:
-                if nxt not in visited:
-                    visited.add(nxt)
-                    queue.append(nxt)
 
-        # 점수/빈도 순 정렬
-        comp.sort(key=lambda x: (x["doc_count"], x["score"]), reverse=True)
+    for i in range(n):
+        if i in used:
+            continue
+        anchor = cands[i]
+        # 상시어(버블, 갤벤, 멤버 이름 등)는 단독 클러스터의 중심축(Anchor)이 될 수 없도록 스킵!
+        # (예: '버블 100일' 토픽이 있을 때 '버블' 단독 토픽이 또 생기는 현상 방지)
+        if anchor["word"] in _BRIDGE_STOPWORDS and anchor["lift"] < 12.0:
+            continue
+
+        used.add(i)
+        comp = [anchor]
+
+        for j in range(i + 1, n):
+            if j in used:
+                continue
+            # 중심축(anchor)과 직접 강하게 연결되어 있을 때만 편입
+            if _are_words_strongly_related(anchor, cands[j]):
+                comp.append(cands[j])
+                used.add(j)
+
+        # 점수/빈도 순 정렬 (단, 상시어보다 고유 토픽어가 앞으로 오도록 정렬)
+        comp.sort(key=lambda x: (x["word"] not in _BRIDGE_STOPWORDS, x["doc_count"], x["score"]), reverse=True)
         union_pids = set()
         for c in comp:
             union_pids |= c["post_ids"]
@@ -314,14 +322,18 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
                 assoc_counter[w] += 1
 
         assoc_kws = []
-        for w, cnt in assoc_counter.most_common(8):
-            # 덩어리 게시글 중 최소 3건 이상에서 함께 등장하고, 평소 대비 의미 있는 단어만 채택
-            if cnt < 3:
+        min_assoc_cnt = max(3, int(len(union_pids) * 0.16))
+        for w, cnt in assoc_counter.most_common(10):
+            # 클러스터 게시글의 최소 16% 이상(최소 3건)에서 함께 등장하고, 평소 대비 의미 있는 단어만 채택
+            if cnt < min_assoc_cnt:
                 continue
             p_t = cnt / n_target
             p_b = base_df[w] / n_base
             lift = round((p_t + 0.002) / (p_b + 0.002), 1)
-            if lift < 2.0:
+            if w in _BRIDGE_STOPWORDS:
+                if (cnt / len(union_pids)) < 0.35 or lift < 1.5:
+                    continue
+            elif lift < 2.2:
                 continue
             assoc_kws.append({
                 "word": w,
@@ -329,7 +341,7 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
                 "count": cnt,
                 "is_assoc": True,
             })
-            if len(assoc_kws) >= 3:
+            if len(assoc_kws) >= 2:
                 break
 
         # 전체 키워드 리스트 (핵심 급상승어 + 단어 노트 동반 연관어)

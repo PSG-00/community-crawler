@@ -70,6 +70,9 @@ def init_db():
     );
     CREATE INDEX IF NOT EXISTS idx_gallery_events_start ON gallery_events (window_start DESC);
     CREATE INDEX IF NOT EXISTS idx_gallery_events_gallery ON gallery_events (gallery_id);
+
+    -- 기준 미달(8건 미만) 소규모 잡담 이벤트 정리
+    DELETE FROM gallery_events WHERE post_count < 8;
     """
     with get_db() as conn:
         with conn.cursor() as cur:

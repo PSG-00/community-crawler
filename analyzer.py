@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import math
@@ -14,19 +15,27 @@ from database import get_db
 
 KST = timezone(timedelta(hours=9))
 
-# 디시인사이드 도메인 특화 불용어 및 일상 상시 출현 단어 사전
+# 디시인사이드 특화 불용어 및 루틴성 노이즈 단어 사전
 STOPWORDS = {
+    # 1. 멤버 생일시(시간 놀이) 노이즈 필터링
+    "리브시", "원시", "원이시", "제나시", "미나미시", "메이시", "남시", "시글",
+    # 2. 일상 루틴 팬 활동 체크인 / 총공 노이즈
+    "총공", "총공완료", "스밍완료", "투표완료", "출석", "출첵", "완료", "인증글",
+    # 3. 디시인사이드 도메인 특화 은어 및 시스템 용어
     "디시", "갤러", "갤러리", "갤", "념글", "개추", "비추", "파딱", "주딱", "완장",
     "유동", "고닉", "통피", "댓글", "작성자", "게시글", "본문", "사진", "영상", "링크",
-    "이유", "생각", "진짜", "오늘", "근데", "어제", "내일", "지금", "하나", "사람",
-    "우리", "그냥", "이거", "저거", "그거", "누구", "보고", "때문", "모두", "다들",
+    "화질", "캡처", "움짤", "자짤", "제목",
+    # 4. URL 및 웹 아티팩트
+    "유튜브", "트위터", "인스타", "틱톡", "링크", "사이트", "영상링크", "조회수",
+    # 5. 일상 구어체 및 지시대명사/부사 (단, '우리'는 우리은행 등 결합 고려하여 제외)
+    "진짜", "오늘", "근데", "어제", "내일", "지금", "하나", "사람",
+    "그냥", "이거", "저거", "그거", "누구", "보고", "때문", "모두", "다들",
     "어디", "언제", "어떻게", "다시", "자기", "정도", "기준", "이번", "얘기", "시작",
     "원래", "제일", "제발", "존나", "시발", "새끼", "새기", "존버", "거의", "약간",
     "전부", "다른", "모든", "무슨", "아무", "어떤", "어차피", "확실", "경우", "자체",
     "사실", "소리", "내용", "부분", "가지", "자꾸", "뭔가", "그게", "저게", "이건",
     "저건", "그건", "이게", "저기", "여기", "거기", "진심", "약간", "제발", "가장",
     "제작", "관련", "그때", "지금껏", "역시", "차라리", "결국", "항상", "이따", "조금",
-    "애들", "멤버", "아이돌", "노래", "무대", "활동", "컴백", "공개", "느낌", "모습",
     "확인", "팬들", "이야기", "비교", "인기", "소식", "예전", "시간", "상황"
 }
 
@@ -39,6 +48,19 @@ def get_kiwi():
     global _kiwi_instance
     if _kiwi_instance is None:
         _kiwi_instance = Kiwi()
+        # 아이돌 멤버명 및 주요 상표/도메인 단어 사용자 사전 등록 (분리 방지)
+        custom_words = [
+            ("우리은행", "NNP"), ("체크카드", "NNG"), ("포토카드", "NNG"), ("포카", "NNG"),
+            ("리센느", "NNP"), ("미나미", "NNP"), ("제나", "NNP"), ("리브", "NNP"),
+            ("메이", "NNP"), ("원이", "NNP"), ("원희", "NNP"), ("직캠", "NNG"),
+            ("스밍", "NNG"), ("음방", "NNG"), ("사전투표", "NNG"), ("뮤비", "NNG"),
+            ("광고모델", "NNG")
+        ]
+        for w, tag in custom_words:
+            try:
+                _kiwi_instance.add_user_word(w, tag)
+            except Exception:
+                pass
     return _kiwi_instance
 
 def can_call_gemini():
@@ -51,11 +73,9 @@ def can_call_gemini():
         _daily_gemini_calls = 0
         _last_call_date = today
 
-    # 하루 최대 20회 제한 (무료 티어 안전 확보)
     if _daily_gemini_calls >= 20:
         return False
 
-    # 최소 30분(1800초) 간격 쿨다운
     if now - _last_gemini_call_time < 1800:
         return False
 
@@ -87,16 +107,30 @@ class TopicAnalyzer:
         self.groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
         self.gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
+    def clean_text(self, text):
+        """URL 및 웹 주소 조각 원천 제거"""
+        if not text:
+            return ""
+        # 1. http, https, www, 도메인 패턴 완전 제거
+        t = re.sub(r'https?://\S+|www\.\S+|[\w-]+\.(com|net|org|kr|co\.kr|be|me|io|xyz)\S*', ' ', text)
+        # 2. 디시 및 플랫폼 경로 잔재 제거
+        t = re.sub(r'\b(gall|board|lists|view|dcinside|mgallery|youtu|youtube|twitter|instagram)\b', ' ', t, flags=re.IGNORECASE)
+        # 3. 특수문자 제거
+        t = re.sub(r'[^\w\s가-힣a-zA-Z]', ' ', t)
+        return t
+
     def tokenize(self, text):
-        """텍스트에서 유효 명사/외래어/신조어만 추출 (2글자 이상, 불용어 제외)"""
+        """텍스트에서 유효 명사/외래어/신조어만 추출 (2글자 이상, 노이즈 제외)"""
         if not text:
             return []
+        cleaned = self.clean_text(text)
         kiwi = get_kiwi()
         try:
-            tokens = kiwi.tokenize(text)
+            tokens = kiwi.tokenize(cleaned)
             words = []
             for t in tokens:
-                if t.tag in ('NNG', 'NNP', 'XR', 'SL') and len(t.form) >= 2 and t.form not in STOPWORDS:
+                # 영어 알파벳 잔재(SL) 제외하고 유효 한국어 명사 및 신조어만 추출
+                if t.tag in ('NNG', 'NNP', 'XR') and len(t.form) >= 2 and t.form not in STOPWORDS:
                     words.append(t.form)
             return words
         except Exception:
@@ -182,7 +216,7 @@ class TopicAnalyzer:
 
     def cluster_topics(self, burst_keywords, target_post_words):
         """동시출현(Co-occurrence) 네트워크 기반 다중 떡밥 군집화"""
-        if len(burst_keywords) < 3:
+        if len(burst_keywords) < 2:
             return []
 
         burst_set = {b["word"]: b for b in burst_keywords}
@@ -213,8 +247,8 @@ class TopicAnalyzer:
         # 연결 요소(Connected Components)로 독립된 떡밥 클러스터 분리
         clusters = []
         for comp in nx.connected_components(g):
-            # 최소 3개 이상의 키워드가 얽혀있어야 떡밥 인정
-            if len(comp) < 3:
+            # 최소 2개 이상의 키워드가 얽혀있어야 떡밥 인정
+            if len(comp) < 2:
                 continue
 
             subgraph = g.subgraph(comp)
@@ -244,33 +278,41 @@ class TopicAnalyzer:
         return clusters[:2]
 
     def generate_summary(self, cluster, start_dt, end_dt, is_backfill=False):
-        """비용/쿼터 보호형 요약 생성기 (대형 떡밥에만 Gemini 호출)"""
+        """제목 + 본문 핵심 문맥을 모두 반영한 고품질 요약 생성기"""
         kws = [k["word"] for k in cluster["keywords"]]
         kw_str = ", ".join(kws[:6])
         post_ids = cluster["post_ids"]
         top_k1 = kws[0] if len(kws) > 0 else "갤러리"
         top_k2 = kws[1] if len(kws) > 1 else ""
 
-        # 대표 게시글 제목 수집
-        sample_titles = []
+        # 대표 게시글 (제목 + 본문 내용) 수집
+        sample_posts_text = []
         if post_ids:
             with get_db() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT title FROM dc_posts WHERE post_id = ANY(%s) LIMIT 5", (post_ids,))
-                    sample_titles = [r[0] for r in cur.fetchall()]
+                    cur.execute("""
+                        SELECT title, content FROM dc_posts
+                        WHERE post_id = ANY(%s)
+                        LIMIT 5
+                    """, (post_ids,))
+                    for r_title, r_content in cur.fetchall():
+                        clean_body = re.sub(r'\s+', ' ', r_content or '').strip()
+                        if clean_body == '__EMPTY__':
+                            clean_body = ''
+                        sample_posts_text.append(f"제목: {r_title}\n내용: {clean_body[:180]}")
 
         time_range_str = f"{start_dt.strftime('%m/%d %H:%M')} ~ {end_dt.strftime('%H:%M')}"
 
         # 1. 1순위: Groq API (openai/gpt-oss-120b, 1000 RPD, 0.5초 초고속 LPU)
-        if (not is_backfill) and self.groq_api_key and cluster["post_count"] >= 8:
-            ai_result = self._call_groq_summary(time_range_str, kws, sample_titles)
+        if self.groq_api_key and cluster["post_count"] >= 8:
+            ai_result = self._call_groq_summary(time_range_str, kws, sample_posts_text)
             if ai_result:
                 log("LLM요약", f"⚡ Groq ({self.groq_model}) 요약 완료 (초고속 LPU / 1,000 RPD)")
                 return ai_result
 
         # 2. 2순위: Gemini API (gemini-2.5-flash, 500 RPD)
         if (not is_backfill) and self.gemini_api_key and cluster["post_count"] >= 10 and can_call_gemini():
-            ai_result = self._call_gemini_summary(time_range_str, kws, sample_titles)
+            ai_result = self._call_gemini_summary(time_range_str, kws, sample_posts_text)
             if ai_result:
                 record_gemini_call()
                 log("LLM요약", f"✨ Gemini API 요약 완료 (오늘 사용량: {_daily_gemini_calls}/500 RPD)")
@@ -282,7 +324,7 @@ class TopicAnalyzer:
         summary_lines = [
             f"• {time_range_str} 사이 '{kw_str}' 관련 게시글이 {cluster['post_count']}건 집중 게재되었습니다.",
             f"• 핵심 키워드 '{top_k1}'의 언급 빈도가 평소 대비 {cluster['keywords'][0]['lift']}배 폭증했습니다.",
-            f"• 주요 반응: " + (" / ".join(sample_titles[:2]) if sample_titles else f"{top_k1} 중심 이야기 활발")
+            f"• 주요 갤러리 반응: {sample_posts_text[0].split(chr(10))[0] if sample_posts_text else f'{top_k1} 중심 이야기 활발'}"
         ]
         mood = f"#{top_k1} #{top_k2 if top_k2 else '화제'} #실시간"
 
@@ -292,7 +334,7 @@ class TopicAnalyzer:
             "mood": mood
         }
 
-    def _call_groq_summary(self, time_range_str, keywords, sample_titles):
+    def _call_groq_summary(self, time_range_str, keywords, sample_posts_text):
         """Groq API (openai/gpt-oss-120b)를 통한 초고속 AI 요약"""
         if not self.groq_api_key:
             return None
@@ -305,28 +347,32 @@ class TopicAnalyzer:
         prompt = f"""당신은 디시인사이드 아이돌 갤러리의 유쾌하고 눈치 빠른 트렌드 요약 봇입니다.
 시간대: {time_range_str}
 급상승 핵심 키워드: {', '.join(keywords[:7])}
-해당 시간대 대표 게시글 제목들:
-{chr(10).join(['- ' + t for t in sample_titles])}
+
+해당 시간대 대표 게시글 (제목 및 본문 내용):
+{chr(10).join(['[게시글 ' + str(i+1) + ']\n' + p for i, p in enumerate(sample_posts_text)])}
 
 [★ 작성 시 절대 주의사항]
-1. 과도한 진지충 / 사회 뉴스 기사체 절대 금지:
-   - 갤러들이 장난치며 노는 것(예: 유튜브 검색기록 공유, 밈, 사진 인증, 주접 등)을 보고 '개인정보 유출', '프라이버시 우려', '보안 위협', '논란' 같은 심각한 사회 뉴스식 억측과 오버해석을 절대로 하지 마세요!
-   - 갤러들의 실제 행동과 놀이 의도 그대로 유쾌하고 생생하게 파악하세요. (예: "검색기록 유출 우려" ❌ -> "유튜브 검색기록 까기 릴레이 유행" ⭕)
-2. 디시 갤러리 특유의 가볍고 재미있는 톤 유지:
+1. 본문 내용 기반 실제 맥락 완벽 반영 (핵심!):
+   - 제목만 보지 말고 본문 내용을 꼼꼼히 확인하여 "누가, 무엇을, 왜" 이야기하는지 구체적 팩트(예: 특정 브랜드/은행 광고 모델 발탁, 특정 방송/이벤트, 실제 굿즈/카드 명칭 등)를 정확하게 포착하세요!
+   - 모호하거나 두루뭉술하게 얼버무리지 말고 구체적인 화제 대상(예: '우리은행 광고 모델 발탁', '신규 체크카드 포토카드 증정' 등)을 제목과 요약에 정확히 명시하세요.
+2. 과도한 진지충 / 사회 뉴스 기사체 절대 금지:
+   - 갤러들이 장난치며 노는 것(유튜브 검색기록 공유, 밈, 사진 인증, 주접 등)을 보고 '개인정보 유출', '프라이버시 우려' 같은 심각한 사회 뉴스식 오버해석을 절대로 하지 마세요!
+   - 갤러들의 실제 행동과 놀이 의도 그대로 유쾌하고 생생하게 파악하세요.
+3. 디시 갤러리 특유의 가볍고 생동감 있는 톤 유지:
    - 팬덤의 덕질, 주접, 웃긴 릴레이, 떡밥 반응을 친근하고 생동감 있게 요약하세요.
 
 위 데이터를 바탕으로 다음 JSON 포맷으로 작성하세요:
 {{
-  "title": "갤러리 분위기를 직관적으로 살린 생생한 한 줄 제목 (20자 내외)",
-  "summary": "갤러들이 왜 모여서 이 이야기를 하고 있는지 유쾌하고 정확한 2~3줄 요약 (글머리 기호 • 사용)",
-  "mood": "실제 커뮤니티 분위기를 담은 해시태그 2~3개 (예: #인증릴레이 #꿀잼 #주접)"
+  "title": "화제 대상을 구체적으로 명시한 생생한 한 줄 제목 (20자 내외)",
+  "summary": "구체적인 원인과 맥락을 담은 유쾌하고 정확한 2~3줄 요약 (글머리 기호 • 사용)",
+  "mood": "실제 커뮤니티 분위기를 담은 해시태그 2~3개"
 }}
 반드시 마크다운 없이 순수 JSON 객체로만 응답하세요."""
 
         payload = {
             "model": self.groq_model,
             "messages": [
-                {"role": "system", "content": "디시인사이드 팬 갤러리 트렌드 요약봇. 진지한 뉴스체 금지. 유쾌하고 생생한 커뮤니티 톤앤매너 유지. 한국어로 JSON 응답."},
+                {"role": "system", "content": "디시인사이드 팬 갤러리 트렌드 요약봇. 본문 사실관계 정확 반영. 진지한 뉴스체 금지. 유쾌하고 생생한 커뮤니티 톤앤매너 유지. 한국어로 JSON 응답."},
                 {"role": "user", "content": prompt}
             ],
             "response_format": {"type": "json_object"},
@@ -349,28 +395,29 @@ class TopicAnalyzer:
             log("Groq오류", f"Groq 처리 예외: {e}")
             return None
 
-    def _call_gemini_summary(self, time_range_str, keywords, sample_titles):
+    def _call_gemini_summary(self, time_range_str, keywords, sample_posts_text):
         """Google Gemini API를 통한 고품질 요약 (최대 10초 타임아웃)"""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.gemini_api_key}"
         
         prompt = f"""당신은 디시인사이드 아이돌 갤러리의 유쾌하고 눈치 빠른 트렌드 요약 봇입니다.
 시간대: {time_range_str}
 급상승 핵심 키워드: {', '.join(keywords[:7])}
-해당 시간대 대표 게시글 제목들:
-{chr(10).join(['- ' + t for t in sample_titles])}
+
+해당 시간대 대표 게시글 (제목 및 본문 내용):
+{chr(10).join(['[게시글 ' + str(i+1) + ']\n' + p for i, p in enumerate(sample_posts_text)])}
 
 [★ 작성 시 절대 주의사항]
-1. 과도한 진지충 / 사회 뉴스 기사체 절대 금지:
-   - 갤러들이 장난치며 노는 것(예: 유튜브 검색기록 공유, 밈, 사진 인증, 주접 등)을 보고 '개인정보 유출', '프라이버시 우려', '보안 위협', '논란' 같은 심각한 사회 뉴스식 억측과 오버해석을 절대로 하지 마세요!
-   - 갤러들의 실제 행동과 놀이 의도 그대로 유쾌하고 생생하게 파악하세요. (예: "검색기록 유출 우려" ❌ -> "유튜브 검색기록 까기 릴레이 유행" ⭕)
-2. 디시 갤러리 특유의 가볍고 재미있는 톤 유지:
-   - 팬덤의 덕질, 주접, 웃긴 릴레이, 떡밥 반응을 친근하고 생동감 있게 요약하세요.
+1. 본문 내용 기반 실제 맥락 완벽 반영:
+   - 제목만 보지 말고 본문 내용을 꼼꼼히 확인하여 구체적 팩트(예: '우리은행 광고 모델 발탁', '신규 체크카드 포토카드 증정' 등)를 제목과 요약에 정확히 명시하세요.
+2. 과도한 진지충 / 사회 뉴스 기사체 절대 금지:
+   - 개인정보 유출, 프라이버시 우려 같은 사회 뉴스식 오버해석 절대 금지! 갤러들의 실제 놀이 의도 그대로 유쾌하게 파악하세요.
+3. 디시 갤러리 특유의 가볍고 생동감 있는 톤 유지.
 
 위 데이터를 바탕으로 다음 JSON 포맷으로 작성하세요:
 {{
-  "title": "갤러리 분위기를 직관적으로 살린 생생한 한 줄 제목 (20자 내외)",
-  "summary": "갤러들이 왜 모여서 이 이야기를 하고 있는지 유쾌하고 정확한 2~3줄 요약 (글머리 기호 • 사용)",
-  "mood": "실제 커뮤니티 분위기를 담은 해시태그 2~3개 (예: #인증릴레이 #꿀잼 #주접)"
+  "title": "화제 대상을 구체적으로 명시한 생생한 한 줄 제목 (20자 내외)",
+  "summary": "구체적인 원인과 맥락을 담은 유쾌하고 정확한 2~3줄 요약 (글머리 기호 • 사용)",
+  "mood": "실제 커뮤니티 분위기를 담은 해시태그 2~3개"
 }}
 반드시 마크다운 없이 순수 JSON 객체로만 응답하세요."""
         req_data = json.dumps({
@@ -485,36 +532,43 @@ class TopicAnalyzer:
 
         return saved_events
 
-    def cleanup_old_micro_topics(self):
-        """기준 미달(8건 미만) 소규모 잡담 및 12시간 이전 구형 데이터 정리"""
+    def reset_and_regenerate_24h(self):
+        """기존 떡밥 완전 삭제 후 최근 24시간을 클린하게 전면 재분석"""
+        log("재구축", "🧹 기존 떡밥 타임라인 완전 초기화 및 최근 24시간 클린 재구축 시작...")
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("TRUNCATE gallery_events RESTART IDENTITY;")
+            conn.commit()
+
+        now_k = get_now_kst()
+        total_created = 0
+
+        # 과거 24시간을 2시간 간격으로 슬라이딩 분석
+        for hours_back in range(24, 0, -2):
+            target_end = now_k - timedelta(hours=hours_back)
+            try:
+                events = self.analyze_window(end_dt=target_end, window_hours=2, is_backfill=False)
+                total_created += len(events)
+            except Exception as e:
+                pass
+            time.sleep(0.1)
+
+        # 현재 시각 기준 마지막 분석
         try:
-            with get_db() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("DELETE FROM gallery_events WHERE post_count < 8 OR topic_summary LIKE '%프라이버시%' OR topic_summary LIKE '%유출%' OR window_end < %s - INTERVAL '12 hours'", (get_now_kst(),))
-                    deleted = cur.rowcount
-                conn.commit()
-            if deleted > 0:
-                log("정리", f"🧹 기준 미달/구형 이벤트 {deleted}건 정리 완료")
-        except Exception as e:
+            events = self.analyze_window(end_dt=now_k, window_hours=2, is_backfill=False)
+            total_created += len(events)
+        except Exception:
             pass
+
+        log("재구축", f"🎉 최근 24시간 주요 떡밥 총 {total_created}건 클린 재구축 완료!")
 
 def run_analyzer_loop():
     """20분 간격 실시간 대형 떡밥 감지 워커 (KST 표준시 기준)"""
     analyzer = TopicAnalyzer(gallery_id="rescene1")
     log("떡밥감지기", "🚀 실시간 대형 떡밥 감지 워커 시작 (KST 동기화 / 20분 간격 / Groq 120B 연동)")
     
-    # 1. 기존 UTC 시차 오류 및 기준 미달 데이터 1회 자동 청소
-    analyzer.cleanup_old_micro_topics()
-
-    # 2. 시작 즉시 오늘 저녁 최근 3시간(KST 기준) 떡밥 즉시 스캔
-    try:
-        now_k = get_now_kst()
-        log("떡밥감지기", f"📍 현재 KST 시각: {now_k.strftime('%Y-%m-%d %H:%M:%S')} (저녁 피크 시간대 즉시 분석)")
-        analyzer.analyze_window(end_dt=now_k - timedelta(hours=2), window_hours=1, is_backfill=False)
-        analyzer.analyze_window(end_dt=now_k - timedelta(hours=1), window_hours=1, is_backfill=False)
-        analyzer.analyze_window(end_dt=now_k, window_hours=1, is_backfill=False)
-    except Exception as e:
-        log("떡밥감지기", f"초기 저녁 스캔 오류: {e}")
+    # 시작 시 최근 24시간 클린 전면 재구축 1회 실행!
+    analyzer.reset_and_regenerate_24h()
 
     while True:
         try:

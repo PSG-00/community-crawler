@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from database import get_db
 
-app = FastAPI(title="DC Inside Community 60-Day Archive Search")
+app = FastAPI(title="DC Inside Community 90-Day Archive Search")
 templates = Jinja2Templates(directory="templates")
 
 def highlight_keywords_in_text(text: str, keywords: list) -> str:
@@ -117,6 +117,8 @@ def execute_search(
             where_clauses.append("created_at >= NOW() - INTERVAL '7 days'")
         elif period == "30d":
             where_clauses.append("created_at >= NOW() - INTERVAL '30 days'")
+        elif period == "90d":
+            where_clauses.append("created_at >= NOW() - INTERVAL '90 days'")
         elif period == "custom":
             if start_date:
                 where_clauses.append("created_at >= %s")

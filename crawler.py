@@ -13,7 +13,7 @@ UA_PC = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, li
 UA_M = 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
 
 GALLERY_ID = "rescene1"
-DAYS_RETENTION = 60
+DAYS_RETENTION = 90
 
 def log(tag, msg):
     now_str = datetime.now(KST).strftime('%H:%M:%S')
@@ -112,9 +112,9 @@ def save_metadata_batch(records):
         conn.commit()
     return count
 
-# ================= 1. 초고속 백필 스레드 (과거 60일치 목록 40만 건 수집) =================
+# ================= 1. 초고속 백필 스레드 (과거 90일치 목록 57만 건 수집) =================
 def metadata_backfill_worker():
-    log("백필", "🚀 과거 60일치 메타데이터(제목/작성자/IP) 초고속 수집 시작!")
+    log("백필", "🚀 과거 90일치 메타데이터(제목/작성자/IP) 초고속 수집 시작!")
     target_cutoff = datetime.now() - timedelta(days=DAYS_RETENTION)
 
     # 이미 수집된 건수가 있으면 그 지점부터 스마트 이어받기
@@ -182,7 +182,7 @@ def content_fill_worker():
                     cur.execute("""
                         SELECT post_id FROM dc_posts
                         WHERE (content IS NULL OR content = '' OR content = ' ')
-                          AND created_at >= NOW() - INTERVAL '60 days'
+                          AND created_at >= NOW() - INTERVAL '90 days'
                         ORDER BY post_id DESC
                         LIMIT 100
                     """)
@@ -250,16 +250,16 @@ def realtime_worker():
                 if saved > 0:
                     log("실시간", f"⚡ 최신 글 {saved}건 즉시 본문 포함 색인 완료!")
 
-            # 매일 새벽 60일 롤링 삭제
+            # 매일 새벽 90일 롤링 삭제
             today = datetime.now(KST).date()
             if last_cleanup != today:
                 with get_db() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("DELETE FROM dc_posts WHERE created_at < NOW() - INTERVAL '60 days'")
+                        cur.execute("DELETE FROM dc_posts WHERE created_at < NOW() - INTERVAL '90 days'")
                         deleted = cur.rowcount
                     conn.commit()
                 if deleted > 0:
-                    log("청소", f"🧹 60일 지난 글 {deleted}건 삭제 완료")
+                    log("청소", f"🧹 90일 지난 글 {deleted}건 삭제 완료")
                 last_cleanup = today
 
         except Exception as e:

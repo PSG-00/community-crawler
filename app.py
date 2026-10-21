@@ -152,7 +152,7 @@ def execute_search(
 
         for r in rows:
             p_id, gall, title, content, nick, code, dt = r
-            raw_content = content or ""
+            raw_content = "" if (not content or content.strip() == "__EMPTY__") else content
             results.append({
                 "post_id": p_id,
                 "url": f"https://gall.dcinside.com/mgallery/board/view/?id={gall}&no={p_id}",

@@ -70,13 +70,17 @@ def parse_list_page(gallery_id, page=1):
     return posts
 
 def fetch_post_content(gallery_id, post_id):
-    """모바일 상세 페이지 본문 텍스트 추출 (줄바꿈/문단 보존)"""
+    """모바일 상세 페이지 본문 텍스트 추출 (이미지 뒤 본문 누락 방지 & 줄바꿈 보존)"""
     url = f"https://m.dcinside.com/board/{gallery_id}/{post_id}"
     h = fetch_html(url, ua=UA_M, timeout=6)
     if not h:
         return ""
 
-    body_m = re.search(r'<div class="thum-txtin"[^>]*>(.*?)</div>', h, re.DOTALL)
+    # 중요: thum-txtin 안의 중첩 <div>(이미지/광고)에 낚여 본문이 잘리지 않도록, 다음 섹션 직전까지 전체 블록 추출
+    body_m = re.search(
+        r'<div class="thum-txtin"[^>]*>(.*?)(?:<div class="reco-search"|<div class="comment|<div class="gallview-btn|<div class="user-info|$)',
+        h, re.DOTALL
+    )
     if not body_m:
         body_m = re.search(r'<div class="writing_view_box"[^>]*>(.*?)</div>', h, re.DOTALL)
     if not body_m:
@@ -85,7 +89,6 @@ def fetch_post_content(gallery_id, post_id):
     raw_html = body_m.group(1)
     clean = re.sub(r'<script.*?</script>', '', raw_html, flags=re.DOTALL)
     clean = re.sub(r'<style.*?</style>', '', clean, flags=re.DOTALL)
-    # 줄바꿈 및 문단 태그 보존
     clean = re.sub(r'<br\s*/?>', '\n', clean, flags=re.IGNORECASE)
     clean = re.sub(r'</?(p|div)[^>]*>', '\n', clean, flags=re.IGNORECASE)
     text = html.unescape(re.sub(r'<[^>]+>', ' ', clean))
@@ -168,15 +171,17 @@ def metadata_backfill_worker():
 
 # ================= 2. 백그라운드 본문 수집 워커 (멀티스레드) =================
 def content_fill_worker():
-    log("본문워커", "🛠️ 본문(Content) 백그라운드 보충 워커 시작")
+    log("본문워커", "🛠️ 본문(Content) 고속 멀티스레드 보충 워커 시작 (워커 수: 10개)")
+    total_filled = 0
+
     while True:
         try:
-            # 본문이 비어있는 최근 60일 이내 글 100건 가져오기
+            # 본문이 비어있거나 기존 파서 오류로 공백(' ') 처리된 최근 60일 글 100건 가져오기
             with get_db() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
                         SELECT post_id FROM dc_posts
-                        WHERE (content IS NULL OR content = '')
+                        WHERE (content IS NULL OR content = '' OR content = ' ')
                           AND created_at >= NOW() - INTERVAL '60 days'
                         ORDER BY post_id DESC
                         LIMIT 100
@@ -187,12 +192,13 @@ def content_fill_worker():
                 time.sleep(10)
                 continue
 
-            # 5개 멀티스레드로 동시 본문 수집
+            # 10개 멀티스레드로 동시 본문 수집
             def fetch_single(pid):
                 cnt = fetch_post_content(GALLERY_ID, pid)
-                return pid, (cnt if cnt else " ")
+                # 빈 텍스트면 다음 번에 중복 시도 방지를 위해 특별 마커 "__EMPTY__" 저장
+                return pid, (cnt if cnt else "__EMPTY__")
 
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=10) as executor:
                 results = list(executor.map(fetch_single, target_ids))
 
             # DB 일괄 업데이트
@@ -202,7 +208,11 @@ def content_fill_worker():
                         cur.execute("UPDATE dc_posts SET content = %s WHERE post_id = %s", (text, pid))
                 conn.commit()
 
-            time.sleep(0.5)
+            total_filled += len(results)
+            if total_filled % 500 == 0 or total_filled <= 100:
+                log("본문워커", f"📥 본문 보충 진행 중: 누적 {total_filled}건 완료")
+
+            time.sleep(0.3)
 
         except Exception as e:
             time.sleep(5)

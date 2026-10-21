@@ -35,6 +35,97 @@
     <!-- Main Container -->
     <main class="max-w-4xl mx-auto px-4 py-4 sm:py-6 flex-1 w-full">
 
+        <!-- 🔥 실시간 갤러리 떡밥 타임라인 & AI 마인드맵 섹션 -->
+        <div class="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-indigo-500/10 border border-amber-200 rounded-2xl p-4 sm:p-5 mb-4 shadow-xs">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                    <span class="flex h-3 w-3 relative">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                    </span>
+                    <h2 class="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-1.5">
+                        <span>실시간 갤러리 떡밥 타임라인</span>
+                        <span class="text-[10px] sm:text-xs font-medium bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-300">AI 감지 & 분석</span>
+                    </h2>
+                </div>
+                <div class="flex items-center gap-2 text-xs">
+                    <button type="button" onclick="refreshTopics()" class="text-slate-500 hover:text-indigo-600 transition flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/60" title="최신 떡밥 새로고침">
+                        <i id="topicRefreshIcon" class="fa-solid fa-rotate-right"></i>
+                        <span class="hidden sm:inline">새로고침</span>
+                    </button>
+                    <button type="button" onclick="toggleTimeline()" id="timelineToggleBtn" class="text-slate-500 hover:text-slate-800 font-medium px-2 py-1 rounded-lg hover:bg-white/60">
+                        접기 ▲
+                    </button>
+                </div>
+            </div>
+
+            <!-- 타임라인 카드 컨테이너 -->
+            <div id="timelineContent" class="space-y-3">
+                {% if recent_topics %}
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="topicsGrid">
+                        {% for topic in recent_topics %}
+                        <div class="bg-white rounded-xl border border-amber-100 p-3.5 shadow-2xs hover:border-amber-400 transition flex flex-col justify-between">
+                            <div>
+                                <div class="flex items-center justify-between gap-2 text-xs mb-1.5">
+                                    <span class="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
+                                        <i class="fa-regular fa-clock mr-1"></i>{{ topic.time_display }}
+                                    </span>
+                                    <span class="text-[11px] text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded-md">
+                                        🔥 {{ topic.post_count }}개 글 집중
+                                    </span>
+                                </div>
+                                
+                                <h3 class="text-sm sm:text-base font-bold text-slate-900 mb-1 leading-snug">
+                                    {{ topic.title }}
+                                </h3>
+
+                                {% if topic.mood %}
+                                <div class="text-[11px] font-medium text-indigo-600 mb-2">
+                                    {{ topic.mood }}
+                                </div>
+                                {% endif %}
+
+                                <div class="text-xs text-slate-600 leading-relaxed space-y-1 mb-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100 whitespace-pre-line">
+                                    {{ topic.summary }}
+                                </div>
+                            </div>
+
+                            <div>
+                                <!-- 연관 급상승 키워드 칩 (원클릭 검색) -->
+                                <div class="text-[11px] text-slate-400 font-medium mb-1.5 flex items-center justify-between">
+                                    <span>급상승 연관어 (클릭 시 즉시 검색):</span>
+                                </div>
+                                <div class="flex flex-wrap gap-1.5 mb-2.5">
+                                    {% for kw in topic.keywords %}
+                                    <button type="button" onclick="quickSearchTopic('{{ kw.word if kw.word is defined else kw }}')" 
+                                            class="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200/80 text-xs px-2 py-0.5 rounded-lg font-medium transition flex items-center gap-1 active:scale-95 shadow-2xs">
+                                        <span>#{{ kw.word if kw.word is defined else kw }}</span>
+                                        {% if kw.lift is defined %}
+                                        <span class="text-[9px] text-amber-700 font-mono opacity-80">{{ kw.lift }}x</span>
+                                        {% endif %}
+                                    </button>
+                                    {% endfor %}
+                                </div>
+
+                                <button type="button" onclick="quickSearchTopic('{{ topic.keyword_list[0] if topic.keyword_list else '' }}')"
+                                        class="w-full bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 text-xs font-semibold py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 border border-indigo-200 group">
+                                    <i class="fa-solid fa-magnifying-glass text-[11px] group-hover:scale-110 transition"></i>
+                                    <span>이 떡밥 관련 글 모아보기</span>
+                                </button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div id="noTopicsNotice" class="text-center py-6 bg-white/80 rounded-xl border border-dashed border-amber-200">
+                        <i class="fa-solid fa-mug-hot text-amber-400 text-2xl mb-1.5"></i>
+                        <p class="text-xs sm:text-sm font-semibold text-slate-700">현재 감지된 새로운 급상승 떡밥이 없습니다.</p>
+                        <p class="text-[11px] text-slate-400 mt-0.5">최근 24시간 대비 특정 키워드가 폭발(Spike)하면 AI가 자동으로 떡밥을 분석하여 기록합니다.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
         <!-- Search Box Form -->
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-5 mb-4">
             <form id="searchForm" action="/" method="get" class="space-y-3">
@@ -288,10 +379,51 @@
 
     <!-- Footer -->
     <footer class="bg-white border-t border-slate-200 py-3 text-center text-xs text-slate-400">
-        리센느 마이너 갤러리 60일 아카이브
+        리센느 마이너 갤러리 90일 무제한 아카이브 & AI 실시간 트렌드 분석
     </footer>
 
     <script>
+        // 타임라인 접기/펼치기 토글
+        function toggleTimeline() {
+            const content = document.getElementById('timelineContent');
+            const btn = document.getElementById('timelineToggleBtn');
+            if (!content) return;
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                btn.innerText = '접기 ▲';
+            } else {
+                content.classList.add('hidden');
+                btn.innerText = '펼치기 ▼';
+            }
+        }
+
+        // 급상승 연관어 및 떡밥 모아보기 원클릭 검색
+        function quickSearchTopic(keyword) {
+            if (!keyword) return;
+            const input = document.querySelector('input[name="q"]');
+            if (input) {
+                input.value = keyword;
+                const targetSelect = document.querySelector('select[name="target"]');
+                if (targetSelect) targetSelect.value = 'all';
+                document.getElementById('searchForm').submit();
+            }
+        }
+
+        // 실시간 떡밥 새로고침
+        async function refreshTopics() {
+            const icon = document.getElementById('topicRefreshIcon');
+            if (icon) icon.classList.add('fa-spin');
+            try {
+                const resp = await fetch('/api/topics');
+                const data = await resp.json();
+                window.location.reload();
+            } catch (err) {
+                console.error("떡밥 새로고침 실패:", err);
+            } finally {
+                if (icon) icon.classList.remove('fa-spin');
+            }
+        }
+
         function toggleCustomDate(show) {
             const box = document.getElementById('customDateBox');
             if (show) {

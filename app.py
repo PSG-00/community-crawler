@@ -1,9 +1,11 @@
 import time
 import html
 import re
+import json
+from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from database import get_db
 
@@ -177,6 +179,59 @@ def execute_search(
         "has_next": has_next
     }
 
+def get_recent_topics(limit: int = 8):
+    """실시간 떡밥 타임라인 이벤트 조회"""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT event_id, gallery_id, window_start, window_end,
+                           topic_title, topic_summary, mood_tag, keywords,
+                           post_count, sample_post_ids, created_at
+                    FROM gallery_events
+                    ORDER BY window_start DESC
+                    LIMIT %s
+                """, (limit,))
+                rows = cur.fetchall()
+
+        topics = []
+        now_date = datetime.now().date()
+        for r in rows:
+            kws = r[7]
+            if isinstance(kws, str):
+                try:
+                    kws = json.loads(kws)
+                except Exception:
+                    kws = []
+            
+            w_start = r[2]
+            w_end = r[3]
+            if w_start.date() == now_date:
+                time_display = f"오늘 {w_start.strftime('%H:%M')} ~ {w_end.strftime('%H:%M')}"
+            else:
+                time_display = f"{w_start.strftime('%m/%d %H:%M')} ~ {w_end.strftime('%H:%M')}"
+
+            # 주요 키워드 리스트
+            keyword_list = [k["word"] if isinstance(k, dict) else str(k) for k in kws]
+
+            topics.append({
+                "event_id": r[0],
+                "gallery_id": r[1],
+                "window_start": str(r[2]),
+                "window_end": str(r[3]),
+                "time_display": time_display,
+                "title": r[4],
+                "summary": r[5],
+                "mood": r[6] or "",
+                "keywords": kws,
+                "keyword_list": keyword_list,
+                "post_count": r[8],
+                "sample_post_ids": r[9] or []
+            })
+        return topics
+    except Exception as e:
+        return []
+
 @app.get("/", response_class=HTMLResponse)
 def index(
     request: Request,
@@ -198,6 +253,8 @@ def index(
             cur.execute("SELECT COUNT(*) FROM dc_posts")
             db_total_posts = cur.fetchone()[0]
 
+    recent_topics = get_recent_topics(limit=8)
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -214,10 +271,16 @@ def index(
             "elapsed_ms": search_data["elapsed_ms"],
             "error_msg": search_data["error_msg"],
             "db_total_posts": db_total_posts,
+            "recent_topics": recent_topics,
             "page": 1,
             "has_next": search_data["has_next"]
         }
     )
+
+@app.get("/api/topics")
+def api_topics(limit: int = Query(10, ge=1, le=50)):
+    """실시간 떡밥 타임라인 API"""
+    return {"topics": get_recent_topics(limit)}
 
 @app.get("/api/search")
 def api_search(

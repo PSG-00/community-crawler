@@ -4,3 +4,5 @@ __pycache__/
 .env
 venv/
 *.pem
+scratch_*
+bot.py*

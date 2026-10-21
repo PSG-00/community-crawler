@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from psycopg2.extras import execute_values
 from database import get_db, init_db
+from analyzer import run_analyzer_loop
 
 KST = timezone(timedelta(hours=9))
 UA_PC = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -278,5 +279,9 @@ if __name__ == "__main__":
     t_content = threading.Thread(target=content_fill_worker, daemon=True)
     t_content.start()
 
-    # 3. 메인 스레드에서 실시간 모니터링 실행
+    # 3. 실시간 떡밥 타임라인 감지 및 AI 요약 워커 시작
+    t_analyzer = threading.Thread(target=run_analyzer_loop, daemon=True)
+    t_analyzer.start()
+
+    # 4. 메인 스레드에서 실시간 모니터링 실행
     realtime_worker()

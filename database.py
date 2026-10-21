@@ -52,6 +52,24 @@ def init_db():
     -- 날짜 정렬 및 60일 롤링 삭제용 B-Tree 인덱스
     CREATE INDEX IF NOT EXISTS idx_posts_created_at ON dc_posts (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_gallery ON dc_posts (gallery_id);
+
+    -- 실시간 갤러리 떡밥 & 토픽 타임라인 테이블
+    CREATE TABLE IF NOT EXISTS gallery_events (
+        event_id SERIAL PRIMARY KEY,
+        gallery_id VARCHAR(50) NOT NULL,
+        window_start TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+        window_end TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+        cluster_id INT NOT NULL DEFAULT 1,
+        topic_title VARCHAR(200) NOT NULL,
+        topic_summary TEXT NOT NULL,
+        mood_tag VARCHAR(100),
+        keywords JSONB NOT NULL,
+        post_count INT NOT NULL DEFAULT 0,
+        sample_post_ids BIGINT[] DEFAULT '{}',
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_gallery_events_start ON gallery_events (window_start DESC);
+    CREATE INDEX IF NOT EXISTS idx_gallery_events_gallery ON gallery_events (gallery_id);
     """
     with get_db() as conn:
         with conn.cursor() as cur:

@@ -3,11 +3,11 @@ import html
 import re
 from typing import Optional
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from database import get_db
 
-app = FastAPI(title="DC Inside Community Search Engine")
+app = FastAPI(title="DC Inside Community 60-Day Archive Search")
 templates = Jinja2Templates(directory="templates")
 
 def highlight_keywords(text: str, keywords: list) -> str:
@@ -20,7 +20,6 @@ def highlight_keywords(text: str, keywords: list) -> str:
     if not valid_kws:
         return escaped_text[:180] + ("..." if len(escaped_text) > 180 else "")
 
-    # 첫 번째 매칭 키워드 위치 기준 스니펫 추출
     first_pos = len(escaped_text)
     for kw in valid_kws:
         pos = escaped_text.lower().find(kw.lower())
@@ -34,24 +33,22 @@ def highlight_keywords(text: str, keywords: list) -> str:
     else:
         snippet = escaped_text[:180] + ("..." if len(escaped_text) > 180 else "")
 
-    # 키워드 하이라이팅
     for kw in valid_kws:
         pattern = re.compile(re.escape(kw), re.IGNORECASE)
         snippet = pattern.sub(r'<mark class="bg-amber-300 text-black px-1 rounded font-bold">\g<0></mark>', snippet)
 
     return snippet
 
-@app.get("/", response_class=HTMLResponse)
-def index(
-    request: Request,
-    q: Optional[str] = Query(None, description="기본 검색어"),
-    target: str = Query("all", description="기본 검색 대상: all, title, content, nickname, code"),
-    sub_q: Optional[str] = Query(None, description="결과 내 재검색어"),
-    sub_target: str = Query("all", description="재검색 대상: all (제목+본문), title (제목만)"),
-    period: str = Query("all", description="날짜 필터: all, 1d, 7d, 30d, custom"),
-    start_date: Optional[str] = Query(None, description="시작일 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="종료일 (YYYY-MM-DD)"),
-    page: int = Query(1, ge=1)
+def execute_search(
+    q: Optional[str] = None,
+    target: str = "all",
+    sub_q: Optional[str] = None,
+    sub_target: str = "all",
+    period: str = "all",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 30
 ):
     keyword = (q or "").strip()
     sub_keyword = (sub_q or "").strip()
@@ -59,10 +56,8 @@ def index(
     error_msg = None
     elapsed_ms = 0.0
     total_count = 0
-    page_size = 30
     offset = (page - 1) * page_size
 
-    # 유효성 검사
     if keyword and target != "code" and len(keyword) < 2:
         error_msg = "기본 검색어는 최소 2글자 이상 입력해야 합니다."
     elif sub_keyword and len(sub_keyword) < 2:
@@ -120,11 +115,9 @@ def index(
 
         with get_db() as conn:
             with conn.cursor() as cur:
-                # 총 개수 조회
                 cur.execute(f"SELECT COUNT(*) FROM dc_posts {where_sql}", params)
                 total_count = cur.fetchone()[0]
 
-                # 결과 리스트 조회 (최신순)
                 query = f"""
                     SELECT post_id, gallery_id, title, content, nickname, author_code, created_at
                     FROM dc_posts
@@ -155,7 +148,32 @@ def index(
                 "created_at": dt.strftime("%Y-%m-%d %H:%M")
             })
 
-    # 전체 DB 통계
+    has_next = (offset + page_size) < total_count
+    return {
+        "results": results,
+        "total_count": total_count,
+        "elapsed_ms": elapsed_ms,
+        "error_msg": error_msg,
+        "page": page,
+        "has_next": has_next
+    }
+
+@app.get("/", response_class=HTMLResponse)
+def index(
+    request: Request,
+    q: Optional[str] = Query(None),
+    target: str = Query("all"),
+    sub_q: Optional[str] = Query(None),
+    sub_target: str = Query("all"),
+    period: str = Query("all"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None)
+):
+    search_data = execute_search(
+        q=q, target=target, sub_q=sub_q, sub_target=sub_target,
+        period=period, start_date=start_date, end_date=end_date, page=1
+    )
+
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM dc_posts")
@@ -165,22 +183,38 @@ def index(
         request=request,
         name="index.html",
         context={
-            "q": keyword,
+            "q": (q or "").strip(),
             "target": target,
-            "sub_q": sub_keyword,
+            "sub_q": (sub_q or "").strip(),
             "sub_target": sub_target,
             "period": period,
             "start_date": start_date or "",
             "end_date": end_date or "",
-            "results": results,
-            "total_count": total_count,
-            "elapsed_ms": elapsed_ms,
-            "error_msg": error_msg,
+            "results": search_data["results"],
+            "total_count": search_data["total_count"],
+            "elapsed_ms": search_data["elapsed_ms"],
+            "error_msg": search_data["error_msg"],
             "db_total_posts": db_total_posts,
-            "page": page,
-            "has_next": (offset + page_size) < total_count,
-            "has_prev": page > 1
+            "page": 1,
+            "has_next": search_data["has_next"]
         }
+    )
+
+@app.get("/api/search")
+def api_search(
+    q: Optional[str] = Query(None),
+    target: str = Query("all"),
+    sub_q: Optional[str] = Query(None),
+    sub_target: str = Query("all"),
+    period: str = Query("all"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    page: int = Query(1, ge=1)
+):
+    """무한 스크롤 및 API용 검색 엔드포인트"""
+    return execute_search(
+        q=q, target=target, sub_q=sub_q, sub_target=sub_target,
+        period=period, start_date=start_date, end_date=end_date, page=page
     )
 
 @app.get("/api/stats")

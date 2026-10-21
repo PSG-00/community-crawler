@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>DC Community Search Engine</title>
+    <title>리센느 갤러리 60일 아카이브 - 최근 2달 무제한 검색</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -18,14 +18,16 @@
     <!-- Header -->
     <header class="bg-indigo-700 text-white shadow-md sticky top-0 z-30">
         <div class="max-w-4xl mx-auto px-4 py-3 sm:py-4 flex justify-between items-center">
-            <div class="flex items-center space-x-2">
-                <i class="fa-solid fa-bolt-lightning text-amber-300 text-xl sm:text-2xl"></i>
-                <a href="/" class="text-lg sm:text-xl font-bold tracking-tight">DC FastSearch</a>
-                <span class="bg-indigo-800 text-indigo-200 text-xs px-2 py-0.5 rounded-full font-medium">RESCENE</span>
+            <div class="flex items-center space-x-2.5">
+                <i class="fa-solid fa-box-archive text-amber-300 text-xl sm:text-2xl"></i>
+                <div>
+                    <a href="/" class="text-base sm:text-lg font-bold tracking-tight block leading-tight">리센느 60일 아카이브</a>
+                    <span class="text-[10px] sm:text-xs text-indigo-200 block">디시 10,000건 제한 없는 최근 2달 전체 검색</span>
+                </div>
             </div>
-            <div class="text-xs text-indigo-200 flex items-center gap-1">
+            <div class="text-xs text-indigo-200 flex items-center gap-1.5 bg-indigo-800/80 px-2.5 py-1.5 rounded-xl border border-indigo-600/50">
                 <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>색인: <strong class="text-white">{{ "{:,}".format(db_total_posts) }}</strong>건</span>
+                <span>보관: <strong class="text-white font-mono">{{ "{:,}".format(db_total_posts) }}</strong>건</span>
             </div>
         </div>
     </header>
@@ -69,7 +71,7 @@
 
                         <label class="shrink-0 cursor-pointer">
                             <input type="radio" name="period" value="all" onchange="toggleCustomDate(false); this.form.submit();" class="hidden peer" {% if period == 'all' %}checked{% endif %}>
-                            <span class="px-3 py-1.5 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">전체 기간</span>
+                            <span class="px-3 py-1.5 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">최근 60일 전체</span>
                         </label>
 
                         <label class="shrink-0 cursor-pointer">
@@ -165,19 +167,18 @@
                 </span>
                 {% endif %}
 
-                <span class="text-slate-600 font-bold ml-1">{{ "{:,}".format(total_count) }}건</span>
+                <span class="text-slate-600 font-bold ml-1">{{ "{:,}".format(total_count) }}건 발견</span>
             </div>
 
-            <div class="flex items-center space-x-1 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full text-xs font-medium">
-                <i class="fa-solid fa-bolt text-emerald-500"></i>
+            <div class="text-xs text-slate-400">
                 <span>{{ elapsed_ms }} ms</span>
             </div>
         </div>
         {% endif %}
 
-        <!-- Results List -->
+        <!-- Results List (무한 스크롤 컨테이너) -->
         {% if results %}
-        <div class="space-y-2.5">
+        <div id="resultsContainer" class="space-y-2.5">
             {% for item in results %}
             <div class="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4 hover:border-indigo-400 transition shadow-2xs">
                 <div class="flex items-start justify-between gap-2 mb-1.5">
@@ -210,22 +211,21 @@
             {% endfor %}
         </div>
 
-        <!-- Pagination -->
-        <div class="flex justify-center items-center space-x-3 mt-6 pb-6">
-            {% if has_prev %}
-            <a href="/?q={{ q }}&target={{ target }}&sub_q={{ sub_q }}&sub_target={{ sub_target }}&period={{ period }}&start_date={{ start_date }}&end_date={{ end_date }}&page={{ page - 1 }}" class="bg-white border border-slate-300 text-slate-700 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium hover:bg-slate-50">
-                <i class="fa-solid fa-chevron-left mr-1"></i> 이전
-            </a>
-            {% endif %}
-
-            <span class="text-xs sm:text-sm text-slate-500 font-medium">페이지 {{ page }}</span>
-
-            {% if has_next %}
-            <a href="/?q={{ q }}&target={{ target }}&sub_q={{ sub_q }}&sub_target={{ sub_target }}&period={{ period }}&start_date={{ start_date }}&end_date={{ end_date }}&page={{ page + 1 }}" class="bg-white border border-slate-300 text-slate-700 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium hover:bg-slate-50">
-                다음 <i class="fa-solid fa-chevron-right ml-1"></i>
-            </a>
-            {% endif %}
+        <!-- 무한 스크롤 로딩 및 종료 표시기 -->
+        <div id="scrollLoader" class="py-6 text-center text-slate-400 text-xs flex justify-center items-center gap-2 {% if not has_next %}hidden{% endif %}">
+            <svg class="animate-spin h-4 w-4 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>다음 글을 불러오는 중...</span>
         </div>
+
+        <div id="scrollEnd" class="py-6 text-center text-slate-400 text-xs {% if has_next %}hidden{% endif %}">
+            <span>🎉 최근 60일간의 검색 결과를 모두 확인했습니다.</span>
+        </div>
+
+        <!-- 스크롤 감지 센티넬 -->
+        <div id="scrollSentinel" class="h-4"></div>
 
         {% elif q or sub_q or period != 'all' %}
         <!-- No Results -->
@@ -235,13 +235,21 @@
             <p class="text-xs text-slate-400 mt-1">다른 검색어나 날짜 필터를 조절해 보세요.</p>
         </div>
         {% else %}
-        <!-- Initial Guidance -->
-        <div class="text-center py-12 bg-white rounded-2xl border border-slate-200">
-            <i class="fa-solid fa-magnifying-glass text-3xl text-indigo-200 mb-2"></i>
-            <h3 class="text-base font-bold text-slate-700">디시인사이드 리센느 갤러리 고속 검색</h3>
-            <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                두 글자 이상의 단어나 식별코드(IP/ID)를 입력하세요. 날짜 필터와 결과 내 재검색을 지원합니다.
+        <!-- Initial Guidance Card -->
+        <div class="text-center py-12 sm:py-16 bg-white rounded-2xl border border-slate-200 px-4">
+            <div class="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 mb-3">
+                <i class="fa-solid fa-box-archive text-2xl"></i>
+            </div>
+            <h3 class="text-base sm:text-lg font-bold text-slate-800">디시인사이드 최근 60일 전체 아카이브</h3>
+            <p class="text-xs sm:text-sm text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
+                디시 본섭의 10,000건 검색 제한 때문에 과거 글을 못 찾는 문제를 해결하기 위해,
+                <strong>최근 2달(60일) 동안 올라온 모든 글</strong>을 보관하고 무제한 검색을 제공합니다.
             </p>
+            <div class="mt-4 flex flex-wrap justify-center gap-2 text-xs text-slate-400">
+                <span class="bg-slate-100 px-2.5 py-1 rounded-full">✨ 무한 스크롤 탐색</span>
+                <span class="bg-slate-100 px-2.5 py-1 rounded-full">📅 60일 날짜 필터링</span>
+                <span class="bg-slate-100 px-2.5 py-1 rounded-full">🔍 식별코드 / 결과 내 재검색</span>
+            </div>
         </div>
         {% endif %}
 
@@ -249,7 +257,7 @@
 
     <!-- Footer -->
     <footer class="bg-white border-t border-slate-200 py-3 text-center text-xs text-slate-400">
-        Powered by PostgreSQL 16 & pg_bigm on AWS EC2
+        리센느 마이너 갤러리 60일 아카이브
     </footer>
 
     <script>
@@ -260,6 +268,94 @@
             } else {
                 box.classList.add('hidden');
             }
+        }
+
+        // ================= 무한 스크롤 구현 (IntersectionObserver) =================
+        let currentPage = 1;
+        let hasNext = {{ 'true' if has_next else 'false' }};
+        let isLoading = false;
+
+        const currentParams = {
+            q: "{{ q }}",
+            target: "{{ target }}",
+            sub_q: "{{ sub_q }}",
+            sub_target: "{{ sub_target }}",
+            period: "{{ period }}",
+            start_date: "{{ start_date }}",
+            end_date: "{{ end_date }}"
+        };
+
+        function renderCard(item) {
+            return `
+            <div class="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4 hover:border-indigo-400 transition shadow-2xs">
+                <div class="flex items-start justify-between gap-2 mb-1.5">
+                    <a href="${item.url}" target="_blank" class="text-base font-bold text-indigo-900 hover:text-indigo-600 hover:underline leading-snug">
+                        ${item.title}
+                    </a>
+                    <span class="text-xs text-slate-400 shrink-0 mt-0.5">#${item.post_id}</span>
+                </div>
+                ${item.content_snippet ? `<p class="text-xs sm:text-sm text-slate-600 leading-relaxed mb-2 line-clamp-2">${item.content_snippet}</p>` : ''}
+                <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 gap-1.5">
+                    <div class="flex items-center space-x-1.5">
+                        <span class="font-medium text-slate-700">${item.nickname}</span>
+                        ${item.author_code ? `<a href="/?q=${encodeURIComponent(item.author_code)}&target=code" class="bg-slate-100 hover:bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-mono transition">(${item.author_code})</a>` : ''}
+                    </div>
+                    <div><i class="fa-regular fa-clock mr-1"></i>${item.created_at}</div>
+                </div>
+            </div>`;
+        }
+
+        async function loadNextPage() {
+            if (!hasNext || isLoading) return;
+            isLoading = true;
+
+            const loader = document.getElementById('scrollLoader');
+            const scrollEnd = document.getElementById('scrollEnd');
+            if (loader) loader.classList.remove('hidden');
+
+            const nextPage = currentPage + 1;
+            const params = new URLSearchParams({
+                ...currentParams,
+                page: nextPage
+            });
+
+            try {
+                const resp = await fetch(`/api/search?${params.toString()}`);
+                const data = await resp.json();
+
+                if (data.results && data.results.length > 0) {
+                    const container = document.getElementById('resultsContainer');
+                    const htmlFragment = data.results.map(renderCard).join('');
+                    container.insertAdjacentHTML('beforeend', htmlFragment);
+
+                    currentPage = nextPage;
+                    hasNext = data.has_next;
+                } else {
+                    hasNext = false;
+                }
+
+                if (!hasNext) {
+                    if (loader) loader.classList.add('hidden');
+                    if (scrollEnd) scrollEnd.classList.remove('hidden');
+                }
+            } catch (err) {
+                console.error("다음 페이지 로드 실패:", err);
+            } finally {
+                isLoading = false;
+                if (!hasNext && loader) loader.classList.add('hidden');
+            }
+        }
+
+        // 스크롤 감지기
+        const sentinel = document.getElementById('scrollSentinel');
+        if (sentinel && hasNext) {
+            const observer = new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting) {
+                    loadNextPage();
+                }
+            }, { rootMargin: '300px' });
+
+            observer.observe(sentinel);
         }
     </script>
 

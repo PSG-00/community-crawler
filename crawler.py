@@ -2,19 +2,24 @@ import urllib.request
 import re
 import html
 import time
-import argparse
+import threading
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+from psycopg2.extras import execute_values
 from database import get_db, init_db
 
 KST = timezone(timedelta(hours=9))
 UA_PC = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 UA_M = 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
 
-def log(msg):
-    now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{now_str}] {msg}", flush=True)
+GALLERY_ID = "rescene1"
+DAYS_RETENTION = 60
 
-def fetch_html(url, ua=UA_PC, timeout=10):
+def log(tag, msg):
+    now_str = datetime.now(KST).strftime('%H:%M:%S')
+    print(f"[{now_str}][{tag}] {msg}", flush=True)
+
+def fetch_html(url, ua=UA_PC, timeout=8):
     req = urllib.request.Request(url, headers={
         'User-Agent': ua,
         'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
@@ -22,12 +27,12 @@ def fetch_html(url, ua=UA_PC, timeout=10):
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode('utf-8', 'ignore')
-    except Exception as e:
+    except Exception:
         return ""
 
 def parse_list_page(gallery_id, page=1):
-    """갤러리 목록 페이지 파싱 (글 번호, 제목, 작성자, 작성일)"""
-    url = f"https://gall.dcinside.com/mgallery/board/lists/?id={gallery_id}&page={page}"
+    """목록 페이지 파싱 (list_num=100으로 1회 요청당 100건 수집)"""
+    url = f"https://gall.dcinside.com/mgallery/board/lists/?id={gallery_id}&list_num=100&page={page}"
     h = fetch_html(url, ua=UA_PC)
     if not h:
         return []
@@ -61,20 +66,13 @@ def parse_list_page(gallery_id, page=1):
         ip = ip_m.group(1) if ip_m else ''
         author_code = uid if uid else ip
 
-        posts.append({
-            "post_id": int(no),
-            "gallery_id": gallery_id,
-            "title": title,
-            "nickname": nickname,
-            "author_code": author_code,
-            "created_at": created_at
-        })
+        posts.append((int(no), gallery_id, title, "", nickname, author_code, created_at))
     return posts
 
 def fetch_post_content(gallery_id, post_id):
-    """모바일 상세 페이지에서 본문 텍스트 추출"""
+    """모바일 상세 페이지 본문 텍스트 추출"""
     url = f"https://m.dcinside.com/board/{gallery_id}/{post_id}"
-    h = fetch_html(url, ua=UA_M, timeout=8)
+    h = fetch_html(url, ua=UA_M, timeout=6)
     if not h:
         return ""
 
@@ -85,128 +83,164 @@ def fetch_post_content(gallery_id, post_id):
         return ""
 
     raw_html = body_m.group(1)
-    # 스크립트, 스타일 태그 제거
     clean = re.sub(r'<script.*?</script>', '', raw_html, flags=re.DOTALL)
     clean = re.sub(r'<style.*?</style>', '', clean, flags=re.DOTALL)
-    # 태그 공백 변환 및 텍스트 추출
     text = html.unescape(re.sub(r'<[^>]+>', ' ', clean))
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    return re.sub(r'\s+', ' ', text).strip()
 
-def save_posts(posts):
-    """게시글 목록 저장 (이미 존재하는 글 제외)"""
-    if not posts:
+def save_metadata_batch(records):
+    """100건 단위 초고속 배치 저장"""
+    if not records:
         return 0
-
-    post_ids = [p["post_id"] for p in posts]
+    query = """
+        INSERT INTO dc_posts (post_id, gallery_id, title, content, nickname, author_code, created_at)
+        VALUES %s
+        ON CONFLICT (post_id) DO NOTHING;
+    """
     with get_db() as conn:
         with conn.cursor() as cur:
-            # 이미 저장된 post_id 조회
-            cur.execute("SELECT post_id FROM dc_posts WHERE post_id = ANY(%s)", (post_ids,))
-            existing_ids = {row[0] for row in cur.fetchall()}
-
-    new_posts = [p for p in posts if p["post_id"] not in existing_ids]
-    if not new_posts:
-        return 0
-
-    # 신규 글에 대해 본문 수집
-    inserted_count = 0
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            for p in new_posts:
-                # 딜레이 살짝 주며 본문 가져오기
-                content = fetch_post_content(p["gallery_id"], p["post_id"])
-                cur.execute("""
-                    INSERT INTO dc_posts (post_id, gallery_id, title, content, nickname, author_code, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (post_id) DO NOTHING;
-                """, (
-                    p["post_id"], p["gallery_id"], p["title"], content,
-                    p["nickname"], p["author_code"], p["created_at"]
-                ))
-                inserted_count += 1
-                time.sleep(0.05)
+            execute_values(cur, query, records)
+            count = cur.rowcount
         conn.commit()
-    return inserted_count
+    return count
 
-def cleanup_old_posts(days=60):
-    """60일 지난 글 일괄 삭제"""
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                DELETE FROM dc_posts 
-                WHERE created_at < NOW() - INTERVAL '%s days';
-            """, (days,))
-            deleted = cur.rowcount
-        conn.commit()
-    if deleted > 0:
-        log(f"🧹 [정리] {days}일 지난 과거 글 {deleted}건 삭제 완료")
+# ================= 1. 초고속 백필 스레드 (과거 60일치 목록 40만 건 수집) =================
+def metadata_backfill_worker():
+    log("백필", "🚀 과거 60일치 메타데이터(제목/작성자/IP) 초고속 수집 시작!")
+    target_cutoff = datetime.now() - timedelta(days=DAYS_RETENTION)
 
-def run_realtime(gallery_id="rescene1", interval_sec=60):
-    """1분 주기 실시간 크롤링 루프"""
-    log(f"🚀 [{gallery_id}] 실시간 크롤러 시작 (수집 주기: {interval_sec}초)")
-    last_cleanup_date = None
-
-    while True:
-        try:
-            # 1. 최신 1~2페이지 수집 (약 50~100건 확인)
-            all_recent_posts = []
-            for p in range(1, 3):
-                page_posts = parse_list_page(gallery_id, page=p)
-                all_recent_posts.extend(page_posts)
-                time.sleep(0.2)
-
-            added = save_posts(all_recent_posts)
-            if added > 0:
-                log(f"📥 신규 글 {added}건 DB 저장 완료")
-
-            # 2. 매일 새벽 1회 60일 롤링 삭제
-            today = datetime.now(KST).date()
-            if last_cleanup_date != today:
-                cleanup_old_posts(days=60)
-                last_cleanup_date = today
-
-        except Exception as e:
-            log(f"⚠️ 크롤링 에러 발생: {e}")
-
-        time.sleep(interval_sec)
-
-def run_backfill(gallery_id="rescene1", days=60):
-    """과거 N일치 데이터 백필 (천천히 역순으로 수집)"""
-    log(f"⏳ [{gallery_id}] 과거 {days}일치 데이터 백필 시작...")
-    target_cutoff = datetime.now() - timedelta(days=days)
-    
     page = 1
+    consecutive_empty = 0
     total_saved = 0
+
     while True:
-        posts = parse_list_page(gallery_id, page=page)
+        posts = parse_list_page(GALLERY_ID, page=page)
         if not posts:
-            log(f"페이지 {page}에 데이터가 없어 백필을 종료합니다.")
-            break
+            consecutive_empty += 1
+            if consecutive_empty >= 3:
+                log("백필", f"페이지 {page}에서 연속 빈 응답. 백필 종료.")
+                break
+            time.sleep(1)
+            continue
+        consecutive_empty = 0
 
-        # 가장 오래된 글이 기준일보다 이전인지 확인
-        oldest_on_page = min(p["created_at"] for p in posts)
-        added = save_posts(posts)
-        total_saved += added
-        log(f"📄 [Page {page}] {len(posts)}건 중 신규 {added}건 저장 (최저 날짜: {oldest_on_page})")
+        # 저장
+        saved = save_metadata_batch(posts)
+        total_saved += saved
 
-        if oldest_on_page < target_cutoff:
-            log(f"🎯 목표 기준일({target_cutoff}) 도달! 총 {total_saved}건 백필 완료.")
+        oldest_dt = min(p[6] for p in posts)
+        if page % 10 == 0 or page == 1:
+            log("백필", f"📄 [Page {page}] {len(posts)}건 중 {saved}건 신규 저장 (누적: {total_saved}건 / 최저: {oldest_dt})")
+
+        # 60일 이전 도달 시 종료
+        if oldest_dt < target_cutoff:
+            log("백필", f"🎯 60일 기준일 도달! 총 {total_saved}건 색인 완료.")
             break
 
         page += 1
-        time.sleep(0.3) # 디시 방화벽 차단 방지용 안전 딜레이
+        time.sleep(0.08) # 방화벽 차단 방지용 안전 딜레이
+
+# ================= 2. 백그라운드 본문 수집 워커 (멀티스레드) =================
+def content_fill_worker():
+    log("본문워커", "🛠️ 본문(Content) 백그라운드 보충 워커 시작")
+    while True:
+        try:
+            # 본문이 비어있는 최근 60일 이내 글 100건 가져오기
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT post_id FROM dc_posts
+                        WHERE (content IS NULL OR content = '')
+                          AND created_at >= NOW() - INTERVAL '60 days'
+                        ORDER BY post_id DESC
+                        LIMIT 100
+                    """)
+                    target_ids = [row[0] for row in cur.fetchall()]
+
+            if not target_ids:
+                time.sleep(10)
+                continue
+
+            # 5개 멀티스레드로 동시 본문 수집
+            def fetch_single(pid):
+                cnt = fetch_post_content(GALLERY_ID, pid)
+                return pid, (cnt if cnt else " ")
+
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                results = list(executor.map(fetch_single, target_ids))
+
+            # DB 일괄 업데이트
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    for pid, text in results:
+                        cur.execute("UPDATE dc_posts SET content = %s WHERE post_id = %s", (text, pid))
+                conn.commit()
+
+            time.sleep(0.5)
+
+        except Exception as e:
+            time.sleep(5)
+
+# ================= 3. 실시간 모니터링 루프 (최신 글 즉시 수집) =================
+def realtime_worker():
+    log("실시간", "👀 실시간 1분 모니터링 가동 (새 글 즉시 반영)")
+    last_cleanup = None
+
+    while True:
+        try:
+            # 1~2페이지 확인
+            recent_posts = []
+            for p in range(1, 3):
+                recent_posts.extend(parse_list_page(GALLERY_ID, page=p))
+                time.sleep(0.1)
+
+            # 신규 글만 필터링
+            post_ids = [p[0] for p in recent_posts]
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT post_id FROM dc_posts WHERE post_id = ANY(%s)", (post_ids,))
+                    existing = {row[0] for row in cur.fetchall()}
+
+            new_posts = [p for p in recent_posts if p[0] not in existing]
+            if new_posts:
+                # 신규 글은 본문까지 바로 긁어서 저장
+                records_to_insert = []
+                for p in new_posts:
+                    body = fetch_post_content(p[1], p[0])
+                    records_to_insert.append((p[0], p[1], p[2], body, p[4], p[5], p[6]))
+                    time.sleep(0.05)
+
+                saved = save_metadata_batch(records_to_insert)
+                if saved > 0:
+                    log("실시간", f"⚡ 최신 글 {saved}건 즉시 본문 포함 색인 완료!")
+
+            # 매일 새벽 60일 롤링 삭제
+            today = datetime.now(KST).date()
+            if last_cleanup != today:
+                with get_db() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM dc_posts WHERE created_at < NOW() - INTERVAL '60 days'")
+                        deleted = cur.rowcount
+                    conn.commit()
+                if deleted > 0:
+                    log("청소", f"🧹 60일 지난 글 {deleted}건 삭제 완료")
+                last_cleanup = today
+
+        except Exception as e:
+            log("실시간", f"에러: {e}")
+
+        time.sleep(60)
 
 if __name__ == "__main__":
     init_db()
 
-    parser = argparse.ArgumentParser(description="DC Inside Gallery Crawler")
-    parser.add_argument("--gallery", default="rescene1", help="갤러리 ID (기본: rescene1)")
-    parser.add_argument("--backfill", type=int, default=0, help="과거 N일치 백필 실행 (예: --backfill 60)")
-    parser.add_argument("--interval", type=int, default=60, help="실시간 수집 주기(초) (기본: 60)")
-    args = parser.parse_args()
+    # 1. 과거 데이터 백필 스레드 시작
+    t_backfill = threading.Thread(target=metadata_backfill_worker, daemon=True)
+    t_backfill.start()
 
-    if args.backfill > 0:
-        run_backfill(gallery_id=args.gallery, days=args.backfill)
-    else:
-        run_realtime(gallery_id=args.gallery, interval_sec=args.interval)
+    # 2. 본문 보충 워커 스레드 시작
+    t_content = threading.Thread(target=content_fill_worker, daemon=True)
+    t_content.start()
+
+    # 3. 메인 스레드에서 실시간 모니터링 실행
+    realtime_worker()

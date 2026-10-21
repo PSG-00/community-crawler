@@ -2,40 +2,43 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DC Community Search Engine</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
     <!-- Header -->
-    <header class="bg-indigo-700 text-white shadow-md">
-        <div class="max-w-5xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-2">
+    <header class="bg-indigo-700 text-white shadow-md sticky top-0 z-30">
+        <div class="max-w-4xl mx-auto px-4 py-3 sm:py-4 flex justify-between items-center">
             <div class="flex items-center space-x-2">
-                <i class="fa-solid fa-bolt-lightning text-amber-300 text-2xl"></i>
-                <a href="/" class="text-xl font-bold tracking-tight">DC Inside FastSearch</a>
+                <i class="fa-solid fa-bolt-lightning text-amber-300 text-xl sm:text-2xl"></i>
+                <a href="/" class="text-lg sm:text-xl font-bold tracking-tight">DC FastSearch</a>
                 <span class="bg-indigo-800 text-indigo-200 text-xs px-2 py-0.5 rounded-full font-medium">RESCENE</span>
             </div>
-            <div class="text-xs text-indigo-200">
-                현재 색인된 글: <strong class="text-white">{{ "{:,}".format(db_total_posts) }}</strong>건
+            <div class="text-xs text-indigo-200 flex items-center gap-1">
+                <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>색인: <strong class="text-white">{{ "{:,}".format(db_total_posts) }}</strong>건</span>
             </div>
         </div>
     </header>
 
     <!-- Main Container -->
-    <main class="max-w-5xl mx-auto px-4 py-8 flex-1 w-full">
+    <main class="max-w-4xl mx-auto px-4 py-4 sm:py-6 flex-1 w-full">
 
-        <!-- Search Form -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 mb-6">
-            <form action="/" method="get" class="space-y-4">
+        <!-- Search Box Form -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-5 mb-4">
+            <form id="searchForm" action="/" method="get" class="space-y-3">
+                <!-- 1차 메인 검색 바 -->
                 <div class="flex flex-col sm:flex-row gap-2">
-                    <!-- 대상 선택 -->
-                    <select name="target" class="bg-slate-100 border border-slate-300 text-slate-700 rounded-xl px-4 py-3 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <select name="target" class="bg-slate-100 border border-slate-300 text-slate-700 rounded-xl px-3 py-2.5 text-sm sm:text-base font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
                         <option value="all" {% if target == 'all' %}selected{% endif %}>전체 (제목+본문)</option>
                         <option value="title" {% if target == 'title' %}selected{% endif %}>제목만</option>
                         <option value="content" {% if target == 'content' %}selected{% endif %}>본문만</option>
@@ -43,23 +46,92 @@
                         <option value="code" {% if target == 'code' %}selected{% endif %}>식별코드 (고닉ID/IP)</option>
                     </select>
 
-                    <!-- 검색어 입력창 -->
                     <div class="relative flex-1">
-                        <input type="text" name="q" value="{{ q }}" placeholder="검색할 단어를 입력하세요 (최소 2글자)" autofocus
-                               class="w-full bg-slate-100 border border-slate-300 text-slate-900 rounded-xl pl-4 pr-10 py-3 text-base focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <input type="text" name="q" value="{{ q }}" placeholder="검색할 단어 입력 (최소 2글자)"
+                               class="w-full bg-slate-100 border border-slate-300 text-slate-900 rounded-xl pl-4 pr-10 py-2.5 sm:py-3 text-base focus:outline-none focus:ring-2 focus:ring-indigo-500">
                         {% if q %}
-                        <a href="/" class="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
+                        <a href="/?target={{ target }}&period={{ period }}" class="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
                             <i class="fa-solid fa-circle-xmark"></i>
                         </a>
                         {% endif %}
                     </div>
 
-                    <!-- 검색 버튼 -->
-                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl px-6 py-3 transition duration-150 flex items-center justify-center space-x-2">
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl px-6 py-2.5 sm:py-3 transition flex items-center justify-center space-x-2 shadow-xs">
                         <i class="fa-solid fa-magnifying-glass"></i>
                         <span>검색</span>
                     </button>
                 </div>
+
+                <!-- 모바일 친화적 날짜 퀵 필터 (가로 스크롤 Chip) -->
+                <div class="pt-2 border-t border-slate-100">
+                    <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                        <span class="text-xs text-slate-400 font-medium shrink-0 mr-1"><i class="fa-regular fa-calendar mr-1"></i>기간:</span>
+
+                        <label class="shrink-0 cursor-pointer">
+                            <input type="radio" name="period" value="all" onchange="toggleCustomDate(false); this.form.submit();" class="hidden peer" {% if period == 'all' %}checked{% endif %}>
+                            <span class="px-3 py-1.5 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">전체 기간</span>
+                        </label>
+
+                        <label class="shrink-0 cursor-pointer">
+                            <input type="radio" name="period" value="1d" onchange="toggleCustomDate(false); this.form.submit();" class="hidden peer" {% if period == '1d' %}checked{% endif %}>
+                            <span class="px-3 py-1.5 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">오늘 (24h)</span>
+                        </label>
+
+                        <label class="shrink-0 cursor-pointer">
+                            <input type="radio" name="period" value="7d" onchange="toggleCustomDate(false); this.form.submit();" class="hidden peer" {% if period == '7d' %}checked{% endif %}>
+                            <span class="px-3 py-1.5 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">최근 7일</span>
+                        </label>
+
+                        <label class="shrink-0 cursor-pointer">
+                            <input type="radio" name="period" value="30d" onchange="toggleCustomDate(false); this.form.submit();" class="hidden peer" {% if period == '30d' %}checked{% endif %}>
+                            <span class="px-3 py-1.5 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">최근 30일</span>
+                        </label>
+
+                        <label class="shrink-0 cursor-pointer">
+                            <input type="radio" name="period" value="custom" id="periodCustom" onchange="toggleCustomDate(true);" class="hidden peer" {% if period == 'custom' %}checked{% endif %}>
+                            <span class="px-3 py-1.5 rounded-full text-xs font-medium border border-slate-200 text-slate-600 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 hover:bg-slate-50 transition">직접 선택</span>
+                        </label>
+                    </div>
+
+                    <!-- 직접 선택 시 펼쳐지는 날짜 피커 -->
+                    <div id="customDateBox" class="{% if period != 'custom' %}hidden{% endif %} flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-dashed border-slate-200">
+                        <input type="date" name="start_date" value="{{ start_date }}" class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700">
+                        <span class="text-xs text-slate-400">~</span>
+                        <input type="date" name="end_date" value="{{ end_date }}" class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700">
+                        <button type="submit" class="bg-slate-800 text-white text-xs font-medium rounded-lg px-3 py-1.5 hover:bg-slate-900 transition">적용</button>
+                    </div>
+                </div>
+
+                <!-- 2차: 검색 결과 내 재검색 (q 또는 sub_q가 있을 때 표시) -->
+                {% if q or sub_q %}
+                <div class="pt-3 border-t border-slate-200 bg-indigo-50/50 -mx-4 -mb-4 p-4 rounded-b-2xl">
+                    <div class="flex flex-col sm:flex-row gap-2 items-center">
+                        <div class="flex items-center gap-1.5 text-xs font-bold text-indigo-900 shrink-0 w-full sm:w-auto">
+                            <i class="fa-solid fa-filter"></i>
+                            <span>결과 내 재검색:</span>
+                        </div>
+
+                        <select name="sub_target" class="w-full sm:w-auto bg-white border border-indigo-200 text-slate-700 rounded-lg px-2.5 py-2 text-xs font-medium focus:ring-1 focus:ring-indigo-500">
+                            <option value="all" {% if sub_target == 'all' %}selected{% endif %}>제목+본문</option>
+                            <option value="title" {% if sub_target == 'title' %}selected{% endif %}>제목만</option>
+                        </select>
+
+                        <div class="relative flex-1 w-full">
+                            <input type="text" name="sub_q" value="{{ sub_q }}" placeholder="결과 내에서 추가로 찾을 키워드 (최소 2글자)"
+                                   class="w-full bg-white border border-indigo-200 text-slate-900 rounded-lg pl-3 pr-8 py-2 text-xs sm:text-sm focus:ring-1 focus:ring-indigo-500">
+                            {% if sub_q %}
+                            <a href="/?q={{ q }}&target={{ target }}&period={{ period }}&start_date={{ start_date }}&end_date={{ end_date }}" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600">
+                                <i class="fa-solid fa-xmark text-xs"></i>
+                            </a>
+                            {% endif %}
+                        </div>
+
+                        <button type="submit" class="w-full sm:w-auto bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-semibold rounded-lg px-4 py-2 transition shrink-0">
+                            재검색
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
             </form>
 
             {% if error_msg %}
@@ -70,12 +142,32 @@
             {% endif %}
         </div>
 
-        <!-- Search Metadata -->
-        {% if q and not error_msg %}
-        <div class="flex justify-between items-center px-1 mb-4 text-sm text-slate-500">
-            <div>
-                <strong>"{{ q }}"</strong> 검색 결과 <span class="font-bold text-slate-800">{{ "{:,}".format(total_count) }}</span>건
+        <!-- Search Metadata & Active Filter Badges -->
+        {% if (q or sub_q or period != 'all') and not error_msg %}
+        <div class="flex flex-wrap justify-between items-center px-1 mb-3 gap-2 text-xs sm:text-sm text-slate-500">
+            <div class="flex flex-wrap items-center gap-1.5">
+                {% if q %}
+                <span class="bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1">
+                    {{ target | replace('all','전체') | replace('title','제목') | replace('content','본문') | replace('nickname','닉네임') | replace('code','식별코드') }}: "{{ q }}"
+                </span>
+                {% endif %}
+
+                {% if sub_q %}
+                <span class="bg-amber-100 text-amber-900 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1">
+                    재검색({{ sub_target | replace('all','제목+본문') | replace('title','제목만') }}): "{{ sub_q }}"
+                    <a href="/?q={{ q }}&target={{ target }}&period={{ period }}&start_date={{ start_date }}&end_date={{ end_date }}" class="text-amber-700 hover:text-amber-900">✕</a>
+                </span>
+                {% endif %}
+
+                {% if period != 'all' %}
+                <span class="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg text-xs font-medium">
+                    {{ period | replace('1d','오늘') | replace('7d','최근 7일') | replace('30d','최근 30일') | replace('custom','기간 지정') }}
+                </span>
+                {% endif %}
+
+                <span class="text-slate-600 font-bold ml-1">{{ "{:,}".format(total_count) }}건</span>
             </div>
+
             <div class="flex items-center space-x-1 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full text-xs font-medium">
                 <i class="fa-solid fa-bolt text-emerald-500"></i>
                 <span>{{ elapsed_ms }} ms</span>
@@ -85,27 +177,29 @@
 
         <!-- Results List -->
         {% if results %}
-        <div class="space-y-3">
+        <div class="space-y-2.5">
             {% for item in results %}
-            <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 hover:border-indigo-400 transition shadow-xs">
-                <div class="flex items-start justify-between gap-2 mb-2">
-                    <a href="{{ item.url }}" target="_blank" class="text-base sm:text-lg font-bold text-indigo-900 hover:text-indigo-600 hover:underline leading-snug">
+            <div class="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4 hover:border-indigo-400 transition shadow-2xs">
+                <div class="flex items-start justify-between gap-2 mb-1.5">
+                    <a href="{{ item.url }}" target="_blank" class="text-base font-bold text-indigo-900 hover:text-indigo-600 hover:underline leading-snug">
                         {{ item.title | safe }}
                     </a>
-                    <span class="text-xs text-slate-400 shrink-0 mt-1">#{{ item.post_id }}</span>
+                    <span class="text-xs text-slate-400 shrink-0 mt-0.5">#{{ item.post_id }}</span>
                 </div>
 
                 {% if item.content_snippet %}
-                <p class="text-sm text-slate-600 leading-relaxed mb-3 line-clamp-2">
+                <p class="text-xs sm:text-sm text-slate-600 leading-relaxed mb-2 line-clamp-2">
                     {{ item.content_snippet | safe }}
                 </p>
                 {% endif %}
 
-                <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 gap-2">
-                    <div class="flex items-center space-x-2">
+                <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 gap-1.5">
+                    <div class="flex items-center space-x-1.5">
                         <span class="font-medium text-slate-700">{{ item.nickname | safe }}</span>
                         {% if item.author_code %}
-                        <span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">({{ item.author_code }})</span>
+                        <a href="/?q={{ item.author_code }}&target=code" title="이 사용자의 글 검색" class="bg-slate-100 hover:bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-mono transition">
+                            ({{ item.author_code }})
+                        </a>
                         {% endif %}
                     </div>
                     <div>
@@ -117,36 +211,36 @@
         </div>
 
         <!-- Pagination -->
-        <div class="flex justify-center items-center space-x-4 mt-8 pb-8">
+        <div class="flex justify-center items-center space-x-3 mt-6 pb-6">
             {% if has_prev %}
-            <a href="/?q={{ q }}&target={{ target }}&page={{ page - 1 }}" class="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50">
-                <i class="fa-solid fa-chevron-left mr-1"></i> 이전 페이지
+            <a href="/?q={{ q }}&target={{ target }}&sub_q={{ sub_q }}&sub_target={{ sub_target }}&period={{ period }}&start_date={{ start_date }}&end_date={{ end_date }}&page={{ page - 1 }}" class="bg-white border border-slate-300 text-slate-700 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium hover:bg-slate-50">
+                <i class="fa-solid fa-chevron-left mr-1"></i> 이전
             </a>
             {% endif %}
 
-            <span class="text-sm text-slate-500 font-medium">페이지 {{ page }}</span>
+            <span class="text-xs sm:text-sm text-slate-500 font-medium">페이지 {{ page }}</span>
 
             {% if has_next %}
-            <a href="/?q={{ q }}&target={{ target }}&page={{ page + 1 }}" class="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50">
-                다음 페이지 <i class="fa-solid fa-chevron-right ml-1"></i>
+            <a href="/?q={{ q }}&target={{ target }}&sub_q={{ sub_q }}&sub_target={{ sub_target }}&period={{ period }}&start_date={{ start_date }}&end_date={{ end_date }}&page={{ page + 1 }}" class="bg-white border border-slate-300 text-slate-700 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium hover:bg-slate-50">
+                다음 <i class="fa-solid fa-chevron-right ml-1"></i>
             </a>
             {% endif %}
         </div>
 
-        {% elif q and not error_msg %}
+        {% elif q or sub_q or period != 'all' %}
         <!-- No Results -->
-        <div class="text-center py-16 bg-white rounded-2xl border border-slate-200">
-            <i class="fa-regular fa-folder-open text-4xl text-slate-300 mb-3"></i>
-            <p class="text-slate-600 font-medium">일치하는 검색 결과가 없습니다.</p>
-            <p class="text-xs text-slate-400 mt-1">다른 검색어를 입력하시거나 조건을 변경해 보세요.</p>
+        <div class="text-center py-12 bg-white rounded-2xl border border-slate-200">
+            <i class="fa-regular fa-folder-open text-3xl text-slate-300 mb-2"></i>
+            <p class="text-slate-600 font-medium text-sm">일치하는 검색 결과가 없습니다.</p>
+            <p class="text-xs text-slate-400 mt-1">다른 검색어나 날짜 필터를 조절해 보세요.</p>
         </div>
-        {% elif not q %}
+        {% else %}
         <!-- Initial Guidance -->
-        <div class="text-center py-16 bg-white rounded-2xl border border-slate-200">
-            <i class="fa-solid fa-magnifying-glass text-4xl text-indigo-200 mb-3"></i>
-            <h3 class="text-lg font-bold text-slate-700">디시인사이드 리센느 갤러리 고속 검색</h3>
-            <p class="text-sm text-slate-500 mt-1 max-w-md mx-auto">
-                두 글자 이상의 단어를 입력하면 PostgreSQL의 <strong class="text-indigo-600">pg_bigm</strong> 인덱스를 통해 10ms 이내로 칼같이 찾아냅니다.
+        <div class="text-center py-12 bg-white rounded-2xl border border-slate-200">
+            <i class="fa-solid fa-magnifying-glass text-3xl text-indigo-200 mb-2"></i>
+            <h3 class="text-base font-bold text-slate-700">디시인사이드 리센느 갤러리 고속 검색</h3>
+            <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                두 글자 이상의 단어나 식별코드(IP/ID)를 입력하세요. 날짜 필터와 결과 내 재검색을 지원합니다.
             </p>
         </div>
         {% endif %}
@@ -154,9 +248,20 @@
     </main>
 
     <!-- Footer -->
-    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
+    <footer class="bg-white border-t border-slate-200 py-3 text-center text-xs text-slate-400">
         Powered by PostgreSQL 16 & pg_bigm on AWS EC2
     </footer>
+
+    <script>
+        function toggleCustomDate(show) {
+            const box = document.getElementById('customDateBox');
+            if (show) {
+                box.classList.remove('hidden');
+            } else {
+                box.classList.add('hidden');
+            }
+        }
+    </script>
 
 </body>
 </html>

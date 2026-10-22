@@ -76,8 +76,90 @@ jobs:
           sudo systemctl enable dc-crawler.service dc-web.service
           sudo systemctl restart dc-crawler.service dc-web.service
 
-      - name: Verify Service Status
+      - name: Verify Service Status & Restart Cloudflare Tunnel
         run: |
           sleep 3
-          sudo systemctl status dc-crawler.service --no-pager
-          sudo systemctl status dc-web.service --no-pager
+          sudo systemctl is-active --quiet dc-crawler.service && CRAWLER_STATUS="OK (정상 동작 중)" || CRAWLER_STATUS="FAIL (중단됨)"
+          sudo systemctl is-active --quiet dc-web.service && WEB_STATUS="OK (80포트 서비스 중)" || WEB_STATUS="FAIL (중단됨)"
+
+          # 클라우드플레어 터널 백그라운드 재실행 및 HTTPS 링크 추출
+          sudo pkill -f "cloudflared tunnel" 2>/dev/null || true
+          nohup cloudflared tunnel --url http://localhost:80 > /tmp/tunnel.log 2>&1 &
+          
+          HTTPS_URL=""
+          for i in {1..20}; do
+            HTTPS_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' /tmp/tunnel.log 2>/dev/null | tail -n 1)
+            if [ -n "$HTTPS_URL" ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          echo "CRAWLER_STATUS=$CRAWLER_STATUS" >> $GITHUB_ENV
+          echo "WEB_STATUS=$WEB_STATUS" >> $GITHUB_ENV
+          echo "HTTPS_URL=${HTTPS_URL:-https://(터널 생성 지연 - 잠시 후 확인)}" >> $GITHUB_ENV
+
+      - name: Send Discord Deployment Notification
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "⚠️ DISCORD_WEBHOOK_URL 시크릿이 설정되지 않아 디스코드 전송을 건너뜁니다."
+            exit 0
+          fi
+
+          COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          AUTHOR=$(git log -1 --pretty=%an)
+          
+          if [ "${{ job.status }}" == "success" ]; then
+            EMBED_COLOR=3066993 # Green
+            STATUS_EMOJI="🚀"
+            DEPLOY_TITLE="배포 성공 및 서비스 시작 알림"
+          else
+            EMBED_COLOR=15158332 # Red
+            STATUS_EMOJI="❌"
+            DEPLOY_TITLE="배포 실패 알림"
+          fi
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "username": "배포 알리미 (Deploy Bot)",
+            "avatar_url": "https://cdn-icons-png.flaticon.com/512/906/906377.png",
+            "embeds": [
+              {
+                "title": "$STATUS_EMOJI $DEPLOY_TITLE",
+                "color": $EMBED_COLOR,
+                "fields": [
+                  {
+                    "name": "🌐 바뀐 접속 사이트 주소 (HTTPS)",
+                    "value": "👉 [${HTTPS_URL}](${HTTPS_URL})",
+                    "inline": false
+                  },
+                  {
+                    "name": "⚙️ 웹 서버 상태 (dc-web)",
+                    "value": "\`$WEB_STATUS\`",
+                    "inline": true
+                  },
+                  {
+                    "name": "🕷️ 크롤러 상태 (dc-crawler)",
+                    "value": "\`$CRAWLER_STATUS\`",
+                    "inline": true
+                  },
+                  {
+                    "name": "📝 최신 커밋",
+                    "value": "\`$COMMIT_HASH\` - $COMMIT_MSG (by $AUTHOR)",
+                    "inline": false
+                  }
+                ],
+                "footer": {
+                  "text": "GitHub Actions Auto Deploy • $(date '+%Y-%m-%d %H:%M:%S KST')"
+                }
+              }
+            ]
+          }
+          EOF
+          )
+
+          curl -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"

@@ -427,11 +427,13 @@ async def api_upload_images(request: Request, files: List[UploadFile] = File(...
         })
 
     full_tags = "".join([item["tag"] for item in uploaded_results])
+    vote_guide_url = f"{base_url}/static/kakaobank_vote_guide.png"
     return {
         "success": True,
         "count": len(uploaded_results),
         "items": uploaded_results,
-        "combined_tags": full_tags
+        "combined_tags": full_tags,
+        "vote_guide_url": vote_guide_url
     }
 
 @app.get("/api/topics")

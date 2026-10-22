@@ -631,18 +631,18 @@
 
         // 카카오뱅크 투표 독려 꼬리말 텍스트 (줄바꿈 <br> 포함)
         const VOTE_FOOTER_HTML = [
-            '<br><br>',
+            '<br>',
             '💘 카뱅 계좌 또는 mini가 있으신 분들은 「모두의 스타상」 리센느 투표 부탁드립니다!<br>',
             '💘 카카오뱅크 앱에서 매일 1회 · 10/30 오후 11시 59분까지<br>',
-            '💘 투표 기간 동안 매일 정성으로 방문드리겠습니다 감사합니다!<br><br>'
+            '💘 투표 기간 동안 매일 정성으로 방문드리겠습니다 감사합니다!<br>'
         ].join('');
 
-        // 체크박스 토글 시 최종 태그 실시간 갱신 함수
+        // 체크박스 토글 시 최종 태그 실시간 갱신 함수 (가이드 짤 -> 그 뒤에 꼬리말 텍스트 배치)
         function updateCombinedOutput() {
             const includeFooter = document.getElementById('includeFooterCheck').checked;
             if (includeFooter) {
-                const guideImgTag = globalVoteGuideUrl ? `<img src="${globalVoteGuideUrl}"><br>` : '';
-                finalOutputTags = baseUploadedImageTags + VOTE_FOOTER_HTML + guideImgTag;
+                const guideImgTag = globalVoteGuideUrl ? `<br><img src="${globalVoteGuideUrl}"><br>` : '';
+                finalOutputTags = baseUploadedImageTags + guideImgTag + VOTE_FOOTER_HTML;
             } else {
                 finalOutputTags = baseUploadedImageTags;
             }

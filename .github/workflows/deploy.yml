@@ -71,20 +71,17 @@ jobs:
           sudo sed -i "s|\\\$WORKDIR|$WORKDIR|g" /etc/systemd/system/dc-web.service
           sudo sed -i "s|\\\$VENV_UVICORN|$VENV_UVICORN|g" /etc/systemd/system/dc-web.service
 
-          # 3. 서비스 활성화 및 재시작
+          # 3. 서비스 활성화 및 재시작 (터널 포함)
           sudo systemctl daemon-reload
-          sudo systemctl enable dc-crawler.service dc-web.service
+          sudo systemctl enable dc-crawler.service dc-web.service dc-tunnel.service 2>/dev/null || true
           sudo systemctl restart dc-crawler.service dc-web.service
+          sudo systemctl restart dc-tunnel.service 2>/dev/null || (sudo pkill -f "cloudflared tunnel" 2>/dev/null; nohup cloudflared tunnel --url http://localhost:80 > /tmp/tunnel.log 2>&1 &)
 
-      - name: Verify Service Status & Restart Cloudflare Tunnel
+      - name: Verify Service Status & Extract Tunnel URL
         run: |
-          sleep 3
+          sleep 4
           sudo systemctl is-active --quiet dc-crawler.service && CRAWLER_STATUS="OK (정상 동작 중)" || CRAWLER_STATUS="FAIL (중단됨)"
           sudo systemctl is-active --quiet dc-web.service && WEB_STATUS="OK (80포트 서비스 중)" || WEB_STATUS="FAIL (중단됨)"
-
-          # 클라우드플레어 터널 백그라운드 재실행 및 HTTPS 링크 추출
-          sudo pkill -f "cloudflared tunnel" 2>/dev/null || true
-          nohup cloudflared tunnel --url http://localhost:80 > /tmp/tunnel.log 2>&1 &
           
           HTTPS_URL=""
           for i in {1..20}; do

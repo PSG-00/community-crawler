@@ -8,16 +8,50 @@ import html
 from collections import Counter, defaultdict
 from datetime import timedelta
 
-# 어절 끝 조사/어미/서술형 종결어미 (긴 것부터 매칭)
+# 체언(명사) 뒤에 붙는 조사 및 서술격 조사('이다' 활용형) 목록 (긴 것부터 매칭)
+# 주의: '-면서', '-는데' 등 동사 어미를 여기서 자르면 '맞으면서' -> '맞으', '맛있었는데' -> '맛있었' 같은 동사 어간 파편이 남으므로,
+# 동사/형용사 활용형은 아래 _HADA_SUFFIX_RE 와 is_korean_predicate() 에서 전담 처리한다!
 _JOSA = sorted([
     "에서는", "에서도", "으로는", "이라도", "이라서", "이라고", "이라는", "이라니", "이라네", "이라던데",
-    "한테서", "에게서", "이구나", "이구만", "이잖아", "이니까", "이지만", "이라며", "이다",
+    "한테서", "에게서", "이구나", "이구만", "이잖아", "이니까", "이지만", "이라며", "인가요", "인건가",
     "에서", "으로", "에게", "한테", "까지", "부터", "보다", "처럼", "마다", "이랑", "이나", "이고",
-    "이면", "이야", "이네", "인데", "이지", "라고", "라는", "라서", "랑은", "만큼", "밖에", "께서",
+    "이면", "이야", "이네", "인데", "이지", "인가", "인지", "인듯", "이다",
+    "라고", "라는", "라서", "랑은", "만큼", "밖에", "께서",
     "이가", "이는", "이도", "이를", "이의", "이만", "이랑은",
-    "하고", "하죠", "면서", "해서", "할까", "거임", "네요", "구나", "구만", "던데", "길래", "잖아", "는데", "건데", "텐데",
     "은", "는", "이", "가", "을", "를", "에", "의", "도", "만", "랑", "로", "와", "과", "나", "야", "아",
 ], key=len, reverse=True)
+
+# [2글자 이상 명사] + [하다/되다 활용어미]에서 명사 어근만 깔끔하게 추출하기 위한 접미 패턴 (예: 취소하고 -> 취소, 공개하네 -> 공개)
+_HADA_SUFFIX_RE = re.compile(
+    r'(하고|하네|하죠|하지|해서|하면|할까|할게|할래|하세요|했어|했다|했네|했지|해라|해요|하는|한데|한거|하노|하누|하냐|되고|되네|돼서|되면|됐어|됐다|되는)$'
+)
+
+# 명사가 아닌 일반 동사/형용사(용언) 활용형 필터링 정규식 (예: 맞으면서, 보는데, 하네, 와서, 먹는, 아는, 맛있어, 걸리면 등)
+_PREDICATE_ENDING_RE = re.compile(
+    r'(면서|는데|던데|건데|텐데|길래|잖아|네요|구나|구만|더라|던가|고싶다|고싶어|고싶네|고있어|걸리면|'
+    r'하네|하고|하죠|하지|해서|하면|할까|할게|할래|하세요|했어|했다|했네|했지|해라|해요|하는|한데|'
+    r'보네|가네|오네|주네|되네|크네|많네|좋네|맞네|웃기네|귀엽네|이쁘네|예쁘네|미쳤네|지리네|'
+    r'와서|가서|봐서|해서|먹는|먹고|먹어|먹자|아는|알아|보는|보고|봤어|가는|오는|쓰는|듣는|'
+    r'맞으|맞아|맞는|맛있어|맛있네|맛있는|맛있던|귀여워|이뻐|예뻐|웃겨|무서워|부러워|고마워|미안해|사랑해)$'
+)
+
+
+def is_korean_predicate(w: str) -> bool:
+    """
+    일반 동사·형용사(서술어) 및 동사 어간 파편('맞으', '맛있었', '미쳤', '보는데', '하네', '와서' 등) 자동 판별:
+    1) 한국어 명사는 절대 쌍시옷('ㅆ', 종성 번호 20: 았/었/였/했/됐/봤/왔/갔/났/졌/쳤/렸/겼/웠/있) 받침으로 끝나지 않음!
+       끝글자 받침이 'ㅆ'이면 100% 과거형/형용사 용언 어간 파편이므로 즉시 제외.
+    2) 동사·형용사 활용 어미 패턴(_PREDICATE_ENDING_RE)에 매칭되면 제외.
+    """
+    if not w:
+        return False
+    last_ch = w[-1]
+    if '가' <= last_ch <= '힣':
+        if (ord(last_ch) - 0xAC00) % 28 == 20:
+            return True
+    if _PREDICATE_ENDING_RE.search(w):
+        return True
+    return False
 
 
 def is_grammatically_valid_josa(stem: str, josa: str) -> bool:
@@ -164,9 +198,9 @@ def detect_corpus_3char_nouns(posts) -> set:
         ab_other_josa = sum(raw_counts[stem2 + cm] for cm in _CASE_MARKERS if cm != last1)
         ab_evidence = ab_standalone + ab_other_josa
 
+        # 2글자 어근(AB)이 단독이나 다른 조사와 결합해 쓰인 근거(ab_evidence)가 0~1건뿐일 때만 온전한 3글자 명사로 보호
+        # (예: '진경은', '대경은'은 '진경', '대경' 근거가 0건이므로 보호 / 반면 '경은이', '예빈이'는 '경은', '예빈' 근거가 많으므로 '이' 분리!)
         if (abc_cnt + abc_plus_josa) >= 2 and ab_evidence <= 1:
-            protected_3char.add(w3)
-        elif abc_plus_josa >= 2 and abc_cnt >= ab_evidence:
             protected_3char.add(w3)
 
     return protected_3char
@@ -185,7 +219,20 @@ def normalize_word(w, extra_stopwords=None, protected_words=None, corpus_3char_n
     if w in ("진경", "진경아", "진경이", "진경이는", "진경이가", "진경이도", "진경이를"):
         return "진경은"
 
-    # 2. 조사 및 서술형 어미 제거 (음운 받침 조화 법칙 + 말뭉치 문맥 3글자 명사 자동 보호)
+    # 보호 단어(화이트리스트)에 지정된 단어는 불용어 필터를 건너뛰고 즉시 통과
+    if protected_words and w in protected_words:
+        return w
+
+    # 2. [2글자 이상 명사] + [하다/되다 어미] (예: '취소하고' -> '취소', '공개하네' -> '공개') 명사 어근 복원
+    m_hada = _HADA_SUFFIX_RE.search(w)
+    if m_hada and len(w) - len(m_hada.group(0)) >= 2:
+        w = w[: -len(m_hada.group(0))]
+
+    # 3. 일반 동사·형용사 활용형('맞으면서', '보는데', '하네', '와서', '먹는', '걸리면', '맛있어' 등) 선제거
+    if is_korean_predicate(w):
+        return ""
+
+    # 4. 체언 조사 제거 (음운 받침 조화 법칙 + 말뭉치 문맥 3글자 명사 자동 보호)
     is_protected_noun = (
         w in _NO_JOSA_STRIP
         or (corpus_3char_nouns and w in corpus_3char_nouns)
@@ -203,15 +250,11 @@ def normalize_word(w, extra_stopwords=None, protected_words=None, corpus_3char_n
     # 복수형 접미사 '-들'(3글자 이상: 가사들 -> 가사, 노래들 -> 노래) 제거
     if len(w) >= 3 and w.endswith("들") and re.search(r'[가-힣]', w[:-1]):
         w = w[:-1]
-    # 조사 제거 후 남은 끝자락 자모 한 번 더 정리
+    # 조사 제거 후 남은 끝자락 자모 및 용언 파편('맞으', '맛있었', '미쳤' 등) 한 번 더 정리
     if re.search(r'[가-힣]', w):
         w = _EDGE_JAMO_RE.sub("", w)
-    if len(w) < 2:
+    if len(w) < 2 or is_korean_predicate(w):
         return ""
-
-    # 보호 단어(화이트리스트)에 지정된 단어는 불용어 필터를 건너뛰고 즉시 통과
-    if protected_words and w in protected_words:
-        return w
 
     if w in _GENERIC or w.lower() in _EN_STOPWORDS:
         return ""

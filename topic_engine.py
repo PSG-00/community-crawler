@@ -14,9 +14,40 @@ _JOSA = sorted([
     "한테서", "에게서", "이구나", "이구만", "이잖아", "이니까", "이지만", "이라며", "이다",
     "에서", "으로", "에게", "한테", "까지", "부터", "보다", "처럼", "마다", "이랑", "이나", "이고",
     "이면", "이야", "이네", "인데", "이지", "라고", "라는", "라서", "랑은", "만큼", "밖에", "께서",
+    "이가", "이는", "이도", "이를", "이의", "이만", "이랑은",
     "하고", "하죠", "면서", "해서", "할까", "거임", "네요", "구나", "구만", "던데", "길래", "잖아", "는데", "건데", "텐데",
     "은", "는", "이", "가", "을", "를", "에", "의", "도", "만", "랑", "로", "와", "과", "나", "야", "아",
 ], key=len, reverse=True)
+
+
+def is_grammatically_valid_josa(stem: str, josa: str) -> bool:
+    """
+    공통 규칙 1 (한국어 음운론 받침 조화 법칙):
+    앞 글자(stem[-1])의 받침(종성) 유무와 뒤따르는 조사(josa)가 한국어 문법 규칙에 부합하는지 유니코드 연산으로 자동 판별.
+    문법적으로 결합 불가능한 경우(예: 무받침 뒤의 '은/이/을/과/으로', 유받침 뒤의 '는/가/를/와/로') 조사가 아닌 단어 원형으로 보존!
+    """
+    if not stem:
+        return False
+    last_ch = stem[-1]
+    if not ('가' <= last_ch <= '힣'):
+        return True
+    batchim = (ord(last_ch) - 0xAC00) % 28  # 0: 무받침, 8: ㄹ받침, 그 외: 유받침
+    has_batchim = (batchim != 0)
+
+    # 반드시 받침이 있어야만 결합 가능한 조사
+    if josa in (
+        "은", "이", "을", "과", "아", "으로", "으로는", "이랑", "이랑은", "이나", "이고", "이면",
+        "이야", "이라도", "이라서", "이라고", "이라는", "이라니", "이라네", "이라던데", "이라며",
+        "이가", "이는", "이도", "이를", "이의", "이만", "이구나", "이구만", "이잖아", "이니까", "이지만",
+    ):
+        return has_batchim
+    # 반드시 받침이 없어야만 결합 가능한 조사
+    if josa in ("는", "가", "를", "와", "야", "랑", "랑은", "나", "라도", "라서", "라고", "라는", "라니"):
+        return not has_batchim
+    # '로'는 무받침이거나 'ㄹ' 받침(batchim == 8)일 때만 결합 가능
+    if josa in ("로",):
+        return (not has_batchim) or (batchim == 8)
+    return True
 
 # 조사 제거 시 끝글자('은/는/이/가/로/아/야/나')가 잘리면 안 되는 고유명사/멤버명 보호 목록
 _NO_JOSA_STRIP = {
@@ -99,7 +130,49 @@ _RITUAL_TITLE_RE = re.compile(
 )
 
 
-def normalize_word(w, extra_stopwords=None, protected_words=None):
+_CASE_MARKERS = ("은", "는", "이", "가", "을", "를", "도", "에", "의", "만", "로", "랑", "과", "와", "한테", "에게", "부터", "까지")
+_AMBIGUOUS_1CHAR_JOSA = {"은", "는", "이", "가", "도", "만", "로", "나", "야", "아"}
+
+
+def detect_corpus_3char_nouns(posts) -> set:
+    """
+    공통 규칙 2 (말뭉치 문맥 어근 검증 법칙 — 사전 하드코딩 없이 3글자 명사 자동 판별):
+    3글자 어절(ABC)의 마지막 글자(C)가 1글자 조사('은/는/이/가/도/만/로/나/야/아')와 모양이 같을 때,
+    현재 게시글 모음에서:
+      1) 2글자 어근(AB)이 단독이나 다른 조사(AB+을/를/에/도 등)와 결합해 쓰인 근거(ab_evidence)가 0~1건뿐이거나,
+      2) 3글자 단어 뒤에 또 다른 조사(ABC+이/가/을/를/도 등)가 붙은 형태가 반복 등장한다면,
+    'AB + 조사 C'가 아니라 'ABC' 자체가 온전한 3글자 고유어/명사임을 자동 판별하여 절단 금지 목록으로 반환!
+    """
+    raw_counts = Counter()
+    for p in posts:
+        text = f"{p[1] or ''} {(p[2] or '')[:80] if p[2] and p[2] != '__EMPTY__' else ''}"
+        text = _INTER_PUNCT_RE.sub("", text)
+        text = _INTERNAL_JAMO_SPLIT_RE.sub(" ", text)
+        for tok in re.findall(r'[가-힣]{2,8}', text):
+            raw_counts[tok] += 1
+
+    protected_3char = set()
+    for w3, abc_cnt in raw_counts.items():
+        if len(w3) != 3 or abc_cnt < 2:
+            continue
+        last1 = w3[2]
+        if last1 not in _AMBIGUOUS_1CHAR_JOSA:
+            continue
+        stem2 = w3[:2]
+        abc_plus_josa = sum(raw_counts[w3 + cm] for cm in _CASE_MARKERS)
+        ab_standalone = raw_counts[stem2]
+        ab_other_josa = sum(raw_counts[stem2 + cm] for cm in _CASE_MARKERS if cm != last1)
+        ab_evidence = ab_standalone + ab_other_josa
+
+        if (abc_cnt + abc_plus_josa) >= 2 and ab_evidence <= 1:
+            protected_3char.add(w3)
+        elif abc_plus_josa >= 2 and abc_cnt >= ab_evidence:
+            protected_3char.add(w3)
+
+    return protected_3char
+
+
+def normalize_word(w, extra_stopwords=None, protected_words=None, corpus_3char_nouns=None):
     w = w.strip()
     if len(w) < 2:
         return ""
@@ -112,11 +185,19 @@ def normalize_word(w, extra_stopwords=None, protected_words=None):
     if w in ("진경", "진경아", "진경이", "진경이는", "진경이가", "진경이도", "진경이를"):
         return "진경은"
 
-    # 2. 조사 및 서술형 어미 제거 (단, '진경은', '*경은', '떡볶이', '*둥이' 등 명사 자체 끝글자는 원형 보호)
-    if w not in _NO_JOSA_STRIP and not _NOUN_ENDING_KEEP_RE.search(w):
+    # 2. 조사 및 서술형 어미 제거 (음운 받침 조화 법칙 + 말뭉치 문맥 3글자 명사 자동 보호)
+    is_protected_noun = (
+        w in _NO_JOSA_STRIP
+        or (corpus_3char_nouns and w in corpus_3char_nouns)
+        or bool(_NOUN_ENDING_KEEP_RE.search(w))
+    )
+    if not is_protected_noun:
         for j in _JOSA:
             if w.endswith(j) and len(w) - len(j) >= 2:
                 stem = w[: -len(j)]
+                # 한국어 받침(종성) 음운 규칙에 맞지 않는 조사 결합이면 자르지 않음!
+                if not is_grammatically_valid_josa(stem, j):
+                    continue
                 w = stem
                 break
     # 복수형 접미사 '-들'(3글자 이상: 가사들 -> 가사, 노래들 -> 노래) 제거
@@ -174,7 +255,7 @@ def strip_learned_signatures(content, learned_signatures=None):
     return text.strip()
 
 
-def extract_words(title, content="", learned_rules=None):
+def extract_words(title, content="", learned_rules=None, corpus_3char_nouns=None):
     """게시글 1개의 [단어 노트] 생성: 복붙 꼬리말 선제거 + 점 찍힌 단어 복원 + 자모 분리 + 조사 제거"""
     sigs = learned_rules.get("signatures") if learned_rules else None
     extra_stops = learned_rules.get("stopwords") if learned_rules else None
@@ -189,7 +270,12 @@ def extract_words(title, content="", learned_rules=None):
     text = _CLEAN_RE.sub(" ", text)
     words = set()
     for raw in text.split():
-        w = normalize_word(raw, extra_stopwords=extra_stops, protected_words=protected)
+        w = normalize_word(
+            raw,
+            extra_stopwords=extra_stops,
+            protected_words=protected,
+            corpus_3char_nouns=corpus_3char_nouns,
+        )
         if w:
             words.add(w)
     return words
@@ -326,14 +412,17 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
     routine_words = (learned_rules or {}).get("routine_words", set())
     protected_words = (learned_rules or {}).get("protected", set())
 
+    # 말뭉치 문맥 기반 3글자 고유 명사 자동 감지 (사전에 없는 신조어/인명도 2글자로 잘리지 않도록 자동 보호)
+    corpus_3char_nouns = detect_corpus_3char_nouns(target_posts)
+
     for p in target_posts:
         pid, title, content, created_at = p[0], p[1], p[2], p[3]
         author = (p[4] or "").strip() if len(p) > 4 else ""
         if is_ritual_title(title):
             continue
         post_map[pid] = p
-        title_note = extract_words(title, "", learned_rules=learned_rules)
-        full_note = extract_words(title, content, learned_rules=learned_rules)
+        title_note = extract_words(title, "", learned_rules=learned_rules, corpus_3char_nouns=corpus_3char_nouns)
+        full_note = extract_words(title, content, learned_rules=learned_rules, corpus_3char_nouns=corpus_3char_nouns)
         post_notes[pid] = full_note
         t_clean = re.sub(r'\s+', '', title or '')
 
@@ -353,7 +442,7 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
     for p in baseline_posts:
         if is_ritual_title(p[1]):
             continue
-        for w in extract_words(p[1], p[2], learned_rules=learned_rules):
+        for w in extract_words(p[1], p[2], learned_rules=learned_rules, corpus_3char_nouns=corpus_3char_nouns):
             base_df[w] += 1
 
     n_target = max(1, len(post_map))

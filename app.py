@@ -2,22 +2,15 @@ import time
 import html
 import re
 import json
-import os
-import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
-from fastapi import FastAPI, Request, Query, UploadFile, File, Form
+from typing import Optional
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from database import get_db
 
 app = FastAPI(title="DC Inside Community 90-Day Archive Search")
 templates = Jinja2Templates(directory="templates")
-
-# 정적 파일 (업로드 이미지 호스팅용) 서빙
-os.makedirs("static/uploads", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 def build_dot_tolerant_regex(term: str) -> str:
     """글자 사이에 점/기호를 넣어 우회한 단어(예: 우.리.은.행, 서.수)까지 매칭하는 정규식"""
@@ -371,7 +364,7 @@ def index(
             "period": period,
             "start_date": start_date or "",
             "end_date": end_date or "",
-            "active_tab": tab if tab in ("search", "topics", "upload") else "search",
+            "active_tab": tab if tab in ("search", "topics") else "search",
             "results": search_data["results"],
             "total_count": search_data["total_count"],
             "elapsed_ms": search_data["elapsed_ms"],
@@ -382,59 +375,6 @@ def index(
             "has_next": search_data["has_next"]
         }
     )
-
-@app.post("/api/upload")
-async def api_upload_images(request: Request, files: List[UploadFile] = File(...)):
-    """
-    이미지 업로드 API:
-    - 업로드된 이미지를 static/uploads에 고유 파일명으로 저장
-    - 디시 본문 삽입용 절대 URL 및 <img src="..."> 태그 반환
-    """
-    allowed_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
-    uploaded_results = []
-    
-    # 도메인/베이스 URL 감지 (X-Forwarded-Proto, Host 헤더 존중)
-    base_url = str(request.base_url).rstrip("/")
-    # https 리버스 프록시 헤더 처리
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
-    if host:
-        base_url = f"{proto}://{host}"
-
-    for file in files:
-        if not file.filename:
-            continue
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in allowed_exts:
-            ext = ".png"
-        
-        # 고유 파일명 생성
-        unique_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
-        file_path = os.path.join("static", "uploads", unique_name)
-        
-        content = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-        
-        file_url = f"{base_url}/static/uploads/{unique_name}"
-        html_tag = f'<img src="{file_url}"><br>'
-        
-        uploaded_results.append({
-            "filename": file.filename,
-            "url": file_url,
-            "tag": html_tag,
-            "size": len(content)
-        })
-
-    full_tags = "".join([item["tag"] for item in uploaded_results])
-    vote_guide_url = f"{base_url}/static/kakaobank_vote_guide.png"
-    return {
-        "success": True,
-        "count": len(uploaded_results),
-        "items": uploaded_results,
-        "combined_tags": full_tags,
-        "vote_guide_url": vote_guide_url
-    }
 
 @app.get("/api/topics")
 def api_topics(limit: int = Query(10, ge=1, le=50)):

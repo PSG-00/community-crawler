@@ -6,3 +6,4 @@ venv/
 *.pem
 scratch_*
 bot.py*
+*.exe

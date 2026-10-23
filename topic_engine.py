@@ -21,7 +21,15 @@ _JOSA = sorted([
 # 조사 제거 시 끝글자('은/는/이/가/로/아/야/나')가 잘리면 안 되는 고유명사/멤버명 보호 목록
 _NO_JOSA_STRIP = {
     "진경은", "경은", "원이", "정원이", "미나미", "메이", "제나", "백화요란", "동아대", "마산대",
+    "떡볶이", "고양이", "강아지", "어린이", "호랑이", "원숭이", "거북이", "부엉이", "멍멍이", "냥냥이",
+    "목걸이", "귀걸이", "옷걸이", "손잡이", "길잡이", "바람막이", "일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일",
+    "바나나", "사우나", "안테나", "세미나", "카메라", "드라마", "고구마", "파자마", "시네마", "제주도", "강원도", "울릉도", "태권도",
 }
+
+# 명사 파생 접미사 패턴 (끝글자 '이'나 '은'이 조사가 아니라 단어의 일부인 경우: *경은, *둥이, *쟁이, *볶이, *걸이 등)
+_NOUN_ENDING_KEEP_RE = re.compile(
+    r'(경은|둥이|쟁이|뱅이|팽이|볶이|걸이|잡이|막이|받이|구이|무침|놀이|맞이|팔이|살이|보기가|바라기)$'
+)
 
 # 디시/일상 범용 기능어 (의미 없는 부사·대명사·상투어·일상 용언)
 _GENERIC = {
@@ -100,13 +108,16 @@ def normalize_word(w, extra_stopwords=None, protected_words=None):
         w = _EDGE_JAMO_RE.sub("", w)
     if len(w) < 2:
         return ""
-    # 2. 조사 및 서술형 어미 제거 (단, '진경은', '미나미', '원이' 등 고유명사는 원형 보호)
-    if w not in _NO_JOSA_STRIP:
+    # '진경아', '진경이' 등 성+이름 축약 호칭은 본명 '진경은'으로 복원
+    if w in ("진경", "진경아", "진경이", "진경이는", "진경이가", "진경이도", "진경이를"):
+        return "진경은"
+
+    # 2. 조사 및 서술형 어미 제거 (단, '진경은', '*경은', '떡볶이', '*둥이' 등 명사 자체 끝글자는 원형 보호)
+    if w not in _NO_JOSA_STRIP and not _NOUN_ENDING_KEEP_RE.search(w):
         for j in _JOSA:
             if w.endswith(j) and len(w) - len(j) >= 2:
-                if w in _NO_JOSA_STRIP:
-                    break
-                w = w[: -len(j)]
+                stem = w[: -len(j)]
+                w = stem
                 break
     # 복수형 접미사 '-들'(3글자 이상: 가사들 -> 가사, 노래들 -> 노래) 제거
     if len(w) >= 3 and w.endswith("들") and re.search(r'[가-힣]', w[:-1]):
@@ -230,7 +241,13 @@ def merge_word_families(cands):
                 if is_suffix and not is_prefix:
                     keeper, other = short, long
                 else:
-                    if len(cands[long]["post_ids"]) >= len(cands[short]["post_ids"]):
+                    # 2글자 축약어(short)와 3글자 이상 온전한 단어(long)가 접두 관계일 때,
+                    # 3글자 이상 단어가 최소 3건 이상(또는 2글자 단어의 40% 이상) 쓰였다면 잘린 2글자 대신 온전한 3글자+ 단어를 대표어로 채택!
+                    long_cnt = len(cands[long]["post_ids"])
+                    short_cnt = len(cands[short]["post_ids"])
+                    if len(short) == 2 and len(long) >= 3 and (long_cnt >= short_cnt * 0.45 or long_cnt >= 4):
+                        keeper, other = long, short
+                    elif long_cnt >= short_cnt:
                         keeper, other = long, short
                     else:
                         keeper, other = short, long

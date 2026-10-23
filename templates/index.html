@@ -54,9 +54,15 @@
                     리센느 90일 아카이브
                 </a>
             </div>
-            <div class="text-[11px] text-indigo-100 flex items-center gap-1.5 bg-indigo-800/90 px-2 py-1 rounded-lg border border-indigo-500/40 font-medium">
-                <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>보관 <strong class="text-white font-mono">{{ "{:,}".format(db_total_posts) }}</strong>건</span>
+            <div class="flex items-center gap-1.5">
+                <div class="text-[11px] text-indigo-100 flex items-center gap-1.5 bg-indigo-800/90 px-2 py-1 rounded-lg border border-indigo-500/40 font-medium">
+                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>보관 <strong class="text-white font-mono">{{ "{:,}".format(db_total_posts) }}</strong>건</span>
+                </div>
+                <a href="/admin" title="관리자 패턴 학습 노트" class="text-[11px] text-indigo-100 hover:text-white bg-indigo-900/80 hover:bg-indigo-800 px-2 py-1 rounded-lg border border-indigo-500/40 transition flex items-center gap-1">
+                    <i class="fa-solid fa-book-bookmark text-[10px] text-amber-300"></i>
+                    <span class="hidden sm:inline">학습노트</span>
+                </a>
             </div>
         </div>
 

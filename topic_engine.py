@@ -1,21 +1,29 @@
 """
-topic_engine.py — LLM 없이 100% 단어 노트(Word Note)와 게시글 내 연관성(Co-occurrence)만으로
-실제 갤러리 떡밥 덩어리와 시간대를 추출하는 엔진
+topic_engine.py — LLM 없이 100% 단어 노트(Word Note), 게시글 내 연관성(Co-occurrence),
+그리고 누적 데이터 기반 규칙 학습 노트(Learning Note)로 갤러리 떡밥과 시간대를 추출하는 엔진
 """
 import re
 import math
+import html
 from collections import Counter, defaultdict
 from datetime import timedelta
 
-# 어절 끝 조사/어미 (긴 것부터 매칭)
+# 어절 끝 조사/어미/서술형 종결어미 (긴 것부터 매칭)
 _JOSA = sorted([
-    "에서는", "에서도", "으로는", "이라도", "이라서", "이라고", "이라는", "한테서", "에게서",
+    "에서는", "에서도", "으로는", "이라도", "이라서", "이라고", "이라는", "이라니", "이라네", "이라던데",
+    "한테서", "에게서", "이구나", "이구만", "이잖아", "이니까", "이지만", "이라며", "이다",
     "에서", "으로", "에게", "한테", "까지", "부터", "보다", "처럼", "마다", "이랑", "이나", "이고",
     "이면", "이야", "이네", "인데", "이지", "라고", "라는", "라서", "랑은", "만큼", "밖에", "께서",
+    "하고", "하죠", "면서", "해서", "할까", "거임", "네요", "구나", "구만", "던데", "길래", "잖아", "는데", "건데", "텐데",
     "은", "는", "이", "가", "을", "를", "에", "의", "도", "만", "랑", "로", "와", "과", "나", "야", "아",
 ], key=len, reverse=True)
 
-# 디시/일상 범용 기능어 (의미 없는 부사·대명사·상투어)
+# 조사 제거 시 끝글자('은/는/이/가/로/아/야/나')가 잘리면 안 되는 고유명사/멤버명 보호 목록
+_NO_JOSA_STRIP = {
+    "진경은", "경은", "원이", "정원이", "미나미", "메이", "제나", "백화요란", "동아대", "마산대",
+}
+
+# 디시/일상 범용 기능어 (의미 없는 부사·대명사·상투어·일상 용언)
 _GENERIC = {
     "진짜", "근데", "그냥", "오늘", "지금", "이거", "저거", "그거", "다들", "혹시", "아니", "너무", "완전",
     "존나", "개웃", "ㅋㅋ", "ㅋㅋㅋ", "ㅋㅋㅋㅋ", "ㅎㅎ", "ㅠㅠ", "ㄹㅇ", "ㅇㅇ", "뭐임", "뭐야", "있음", "없음",
@@ -29,7 +37,18 @@ _GENERIC = {
     "보니까", "봤는데", "보는", "보고", "할까", "해야", "되나", "되는", "된다", "맞음", "맞냐", "아님", "아니라",
     "총공", "스밍", "투표", "출석", "출첵", "총공자", "오이쉬", "오이쉬에", "야호",
     "생일시", "멤버시", "중간시", "대장시", "경은시", "리브시", "미남시", "미나미시", "까엉시", "제나시", "메이시", "예빈시", "원이시",
-    "새로고침", "머야", "오늘도", "앞에서", "있는데", "아니라", "진짜로", "어제자", "지금까지", "하는거", "같은데",
+    "새로고침", "머야", "오늘도", "앞에서", "있는데", "어제자", "지금까지", "하는거",
+    "뭔가", "좋아", "좋겠다", "좋겠네", "좋아하는", "나오네", "나온다", "하죠", "같아", "같은", "그럴", "그런", "이런", "저런",
+    "사람들", "생각보다", "어쩌다", "그렇게", "이렇게", "저렇게", "많네", "맞지", "아닌가", "있나", "없나", "보네",
+    "내가", "니가", "네가", "나는", "너는", "우린", "걔네", "얘네", "쟤네", "누구", "어디", "언제", "무엇",
+}
+
+# 영어 기초 불용어 (영문 가사/슬로건 문구가 전치사·대명사로 쪼개져 토픽화되는 현상 방지)
+_EN_STOPWORDS = {
+    "with", "us", "for", "all", "the", "and", "to", "in", "of", "is", "are", "on", "at", "by",
+    "my", "you", "we", "it", "be", "this", "that", "from", "but", "not", "so", "if", "or", "as",
+    "do", "no", "yes", "can", "will", "just", "like", "your", "me", "our", "out", "up", "about",
+    "what", "who", "how", "when", "where", "why", "stay", "thing", "dc", "official", "app", "ver",
 }
 
 # 갤러리 상시 소재 (멤버명/버블/갤벤 등): 단독이나 보조 연관어는 될 수 있어도, 서로 다른 두 떡밥을 이어주는 '다리(Bridge)'가 되면 안 되는 단어들
@@ -38,10 +57,27 @@ _BRIDGE_STOPWORDS = {
     "원이", "대장", "리브", "리부", "경은", "진경은", "미나미", "미남", "메이", "예빈", "이예빈", "제나", "까엉", "가영",
 }
 
+# 접미 합성어 병합 시 너무 흔해서 서로 다른 뜻의 단어를 잘못 묶을 수 있는 일반 명사 접미어 제외 목록
+_GENERIC_SUFFIXES = {
+    "사람", "생각", "느낌", "시간", "오늘", "내일", "어제", "정도", "부분", "문제", "이유", "기분",
+    "사진", "영상", "노래", "무대", "추천", "이야기", "얘기", "말고", "때문", "소리", "모습", "마음",
+}
+
 _URL_RE = re.compile(r'https?://\S+|www\.\S+|\S+\.(com|net|org|kr|be|me|io|ly)\S*', re.I)
 # 디시 금칙어 우회용 글자 사이 점/슬래시/쉼표 결합 (우.리.은.행 -> 우리은행, 서.수 -> 서수)
 _INTER_PUNCT_RE = re.compile(r'(?<=[가-힣0-9])[.,/·•_~\-]+(?=[가-힣])')
+# 어절 내부에 2개 이상 연속된 ㅋㅋ/ㅎㅎ/ㅠㅠ가 끼어 단어가 붙은 경우(예: 엌ㅋㅋㅋㅋ메이김밥) 공백으로 분리
+_INTERNAL_JAMO_SPLIT_RE = re.compile(r'[ㄱ-ㅎㅏ-ㅣ]{2,}')
+# 어절 앞뒤에 붙은 자모/웃음(예: 예빈김밥ㅋㅋㅋㅋㅋ, 157김밥ㅌㅋㅋㅋㅋㅋ) 제거용
+_EDGE_JAMO_RE = re.compile(r'^[ㄱ-ㅎㅏ-ㅣ]+|[ㅌㅋㅎㅠㅜㅡ]*[ㄱ-ㅎㅏ-ㅣ]+$')
 _CLEAN_RE = re.compile(r'[^0-9A-Za-z가-힣ㄱ-ㅎ\s]')
+
+# 기본 투표 독려 꼬리말 / 앱 서명 마스킹 정규식
+_BUILTIN_FOOTER_RE = re.compile(
+    r'(카뱅\s*계좌\s*또는\s*mini가\s*있으신\s*분들은[^\n]*|카카오뱅크\s*앱에서\s*매일\s*1회[^\n]*|투표\s*기간\s*동안\s*매일\s*정성으로[^\n]*|모두의\s*스타상[^\n]*투표\s*부탁[^\n]*|-\s*dc\s*official\s*App)',
+    re.I
+)
+
 # 시간 맞춤 놀이(미남시, 까엉시, 경은씨+2, 진경은짱짱걸시, 수원왕발가락시 ...): 짧은 제목이 '시/씨'로 끝나는 패턴
 _TIMECALL_RE = re.compile(r'^[^\s]{0,16}[시씨](간)?\s*([+@\-]\s*\d*)?[!~.?ㅋㅎㅠㅜ\s]*$')
 # 문장형 생일시 언급 (예: "아 경은시 놓쳤어", "까엉시 +1", "미남시 막타", "생일시 보내줘야지")
@@ -55,23 +91,47 @@ _RITUAL_TITLE_RE = re.compile(
 )
 
 
-def normalize_word(w):
+def normalize_word(w, extra_stopwords=None, protected_words=None):
     w = w.strip()
     if len(w) < 2:
         return ""
-    for j in _JOSA:
-        if w.endswith(j) and len(w) - len(j) >= 2:
-            w = w[: -len(j)]
-            break
-    if len(w) < 2 or w in _GENERIC:
+    # 1. 어절 양끝의 ㅋㅋ/ㅎㅎ/ㅠㅠ/ㅌ 자모 선제거 (예: '예빈이김밥은ㅋㅋㅋㅋ' -> '예빈이김밥은')
+    if re.search(r'[가-힣]', w):
+        w = _EDGE_JAMO_RE.sub("", w)
+    if len(w) < 2:
+        return ""
+    # 2. 조사 및 서술형 어미 제거 (단, '진경은', '미나미', '원이' 등 고유명사는 원형 보호)
+    if w not in _NO_JOSA_STRIP:
+        for j in _JOSA:
+            if w.endswith(j) and len(w) - len(j) >= 2:
+                if w in _NO_JOSA_STRIP:
+                    break
+                w = w[: -len(j)]
+                break
+    # 복수형 접미사 '-들'(3글자 이상: 가사들 -> 가사, 노래들 -> 노래) 제거
+    if len(w) >= 3 and w.endswith("들") and re.search(r'[가-힣]', w[:-1]):
+        w = w[:-1]
+    # 조사 제거 후 남은 끝자락 자모 한 번 더 정리
+    if re.search(r'[가-힣]', w):
+        w = _EDGE_JAMO_RE.sub("", w)
+    if len(w) < 2:
+        return ""
+
+    # 보호 단어(화이트리스트)에 지정된 단어는 불용어 필터를 건너뛰고 즉시 통과
+    if protected_words and w in protected_words:
+        return w
+
+    if w in _GENERIC or w.lower() in _EN_STOPWORDS:
+        return ""
+    if extra_stopwords and w in extra_stopwords:
         return ""
     if re.fullmatch(r'[0-9]+', w):
         return ""
     if (w.endswith("시") or w.endswith("씨")) and len(w) <= 8:
         return ""
-    if re.match(r'^(총공|스밍|투표|출석|음총|댓총|센모닝|센나잇|생일시|멤버시)', w):
+    if re.match(r'^(총공|스밍|투표|출석|음총|댓총|센모닝|센나잇|생일시|멤버시|ㄱㅂㅇㅈ|ㅌㅍㅇㅈ)', w):
         return ""
-    if re.fullmatch(r'[ㄱ-ㅎ]+', w) and len(set(w)) <= 2:
+    if re.fullmatch(r'[ㄱ-ㅎㅏ-ㅣ]+', w):
         return ""
     return w
 
@@ -91,49 +151,109 @@ def is_ritual_title(title):
     return False
 
 
-def extract_words(title, content=""):
-    """게시글 1개의 [단어 노트] 생성: 점 찍힌 단어 복원 + 어절 분리 + 조사 제거 (본문 하단 잡담 오염 방지를 위해 제목+본문 첫 80자만 사용)"""
-    clean_content = (content or "")[:80] if content and content != "__EMPTY__" else ""
+def strip_learned_signatures(content, learned_signatures=None):
+    """본문 앞 80자를 자르기 전에 투표 독려 꼬리말 및 학습 노트에 등재된 복붙 서명문을 먼저 제거"""
+    if not content or content == "__EMPTY__":
+        return ""
+    text = _BUILTIN_FOOTER_RE.sub(" ", content)
+    if learned_signatures:
+        for sig in learned_signatures:
+            if sig and len(sig) >= 8 and sig in text:
+                text = text.replace(sig, " ")
+    return text.strip()
+
+
+def extract_words(title, content="", learned_rules=None):
+    """게시글 1개의 [단어 노트] 생성: 복붙 꼬리말 선제거 + 점 찍힌 단어 복원 + 자모 분리 + 조사 제거"""
+    sigs = learned_rules.get("signatures") if learned_rules else None
+    extra_stops = learned_rules.get("stopwords") if learned_rules else None
+    protected = learned_rules.get("protected") if learned_rules else None
+
+    cleaned_body = strip_learned_signatures(content, sigs)
+    clean_content = cleaned_body[:80] if cleaned_body else ""
     text = f"{title or ''} {clean_content}"
     text = _URL_RE.sub(" ", text)
     text = _INTER_PUNCT_RE.sub("", text)
+    text = _INTERNAL_JAMO_SPLIT_RE.sub(" ", text)
     text = _CLEAN_RE.sub(" ", text)
     words = set()
     for raw in text.split():
-        w = normalize_word(raw)
+        w = normalize_word(raw, extra_stopwords=extra_stops, protected_words=protected)
         if w:
             words.add(w)
     return words
 
 
-def merge_prefix_family(cands):
+def merge_word_families(cands):
     """
-    접두사 포함관계 묶기:
-    - '무아'(34건) + '무아짱'(4건) → '무아'(38건)
-    - '검색'(6건) + '검색기록'(21건) → '검색기록'(27건)
+    접두사(Prefix) 및 접미사(Suffix) 합성어 패밀리 통합:
+    1) 접두사 포함관계: '검색'(6) + '검색기록'(21) → '검색기록'(27)
+    2) 접미사 합성어 포함관계: '김밥'(5) + '예빈이김밥'(6) + '예빈김밥'(5) + '메이김밥'(4) + '157김밥'(4)
+       → '김밥' 패밀리로 게시글·작성자 풀을 통합하고, 세부 변형어 빈도(variant_counts)를 보존하여
+       토픽 제목에 [김밥 · 예빈이김밥 · 메이김밥] 형태로 풍부하게 노출!
     """
-    words = sorted(cands.keys(), key=len)
+    # 고유 토픽어(비-상시어)가 멤버 이름(_BRIDGE_STOPWORDS)보다 먼저 합성어를 흡수하도록 정렬
+    words = sorted(cands.keys(), key=lambda w: (len(w), w in _BRIDGE_STOPWORDS, w))
     absorbed = set()
+
+    def _absorb(keeper, other):
+        cands[keeper]["post_ids"] |= cands[other]["post_ids"]
+        cands[keeper]["authors"] |= cands[other]["authors"]
+        for u, cnt in cands[other]["author_counts"].items():
+            cands[keeper]["author_counts"][u] += cnt
+        cands[keeper]["title_hits"] += cands[other]["title_hits"]
+        cands[keeper]["titles"].extend(cands[other]["titles"])
+        cands[keeper]["variants"] |= cands[other]["variants"] | {other}
+        for vw, vcnt in cands[other]["variant_counts"].items():
+            cands[keeper]["variant_counts"][vw] += vcnt
+        cands[keeper]["base_cnt"] = max(cands[keeper]["base_cnt"], cands[other]["base_cnt"])
+        absorbed.add(other)
+
+    # 1차: 짧은 어근 단어(short, 2글자 이상)가 존재할 때 접미(endswith) 또는 접두(startswith) 합성어 통합
     for i, short in enumerate(words):
         if short in absorbed or short not in cands:
+            continue
+        if len(short) < 2 or not re.search(r'[가-힣]', short):
             continue
         for long in words[i + 1:]:
             if long in absorbed or long not in cands:
                 continue
-            if long.startswith(short) and len(short) >= 2:
-                if len(cands[long]["post_ids"]) >= len(cands[short]["post_ids"]):
-                    keeper, other = long, short
-                else:
+            # 멤버 이름(예빈, 메이 등)이 4글자 이상 합성 명사(예빈김밥, 메이김밥)를 가로채지 않도록 방지
+            is_prefix = long.startswith(short) and not (short in _BRIDGE_STOPWORDS and len(long) >= 4)
+            is_suffix = (
+                long.endswith(short)
+                and len(short) >= 2
+                and short not in _GENERIC_SUFFIXES
+                and short not in _BRIDGE_STOPWORDS
+            )
+            if is_prefix or is_suffix:
+                if is_suffix and not is_prefix:
                     keeper, other = short, long
-                cands[keeper]["post_ids"] |= cands[other]["post_ids"]
-                cands[keeper]["authors"] |= cands[other]["authors"]
-                for u, cnt in cands[other]["author_counts"].items():
-                    cands[keeper]["author_counts"][u] += cnt
-                cands[keeper]["variants"] |= cands[other]["variants"] | {other}
-                cands[keeper]["base_cnt"] = max(cands[keeper]["base_cnt"], cands[other]["base_cnt"])
-                absorbed.add(other)
+                else:
+                    if len(cands[long]["post_ids"]) >= len(cands[short]["post_ids"]):
+                        keeper, other = long, short
+                    else:
+                        keeper, other = short, long
+                _absorb(keeper, other)
                 if other == short:
                     break
+
+    # 2차: 단독 짧은 어근이 없더라도, 3개 이상의 합성어가 동일한 2글자 이상 한글 접미사를 공유하는 경우 (예: 예빈김밥, 메이김밥, 157김밥)
+    remaining = [w for w in cands.keys() if w not in absorbed and len(w) >= 3 and re.search(r'[가-힣]{2}$', w)]
+    suffix_groups = defaultdict(list)
+    for w in remaining:
+        suf = w[-2:]
+        if suf not in _GENERIC_SUFFIXES and suf not in _BRIDGE_STOPWORDS and suf not in _GENERIC:
+            suffix_groups[suf].append(w)
+
+    for suf, group in suffix_groups.items():
+        if len(group) >= 3:
+            group.sort(key=lambda w: len(cands[w]["post_ids"]), reverse=True)
+            keeper = group[0]
+            for other in group[1:]:
+                if other not in absorbed and other in cands:
+                    _absorb(keeper, other)
+
     for w in absorbed:
         cands.pop(w, None)
     return cands
@@ -141,12 +261,9 @@ def merge_prefix_family(cands):
 
 def _are_words_strongly_related(c1, c2):
     """
-    두 급상승 단어가 '정말로 같은 토픽'인지 엄격하게 판정 (억지 병합 및 다리 연결 방지):
-    1) 글자 뿌리 / 은어 변형 (예: 우이은행 <-> 우리은행 <-> 은행, 검색기록 <-> 기록, 1호선 <-> 2호선, 슈붕 <-> 팥붕 <-> 붕어빵)
-    2) 높은 게시글 동시출현 비율:
-       - 두 단어가 같은 게시글에 최소 3건 이상 함께 등장하면서,
-       - 작은 쪽 게시글의 30% 이상(또는 Jaccard >= 20%)이 겹칠 때만 같은 토픽으로 묶음!
-       - 단, 멤버 이름이나 '버블/갤벤' 같은 상시어(_BRIDGE_STOPWORDS)는 어근 변형이 아닌 이상 다른 고유 토픽과 합치지 않음.
+    두 급상승 단어가 '정말로 같은 토픽'인지 판정:
+    1) 글자 뿌리 / 은어 변형
+    2) 높은 게시글 동시출현 비율
     """
     w1, w2 = c1["word"], c2["word"]
     pids1, pids2 = c1["post_ids"], c2["post_ids"]
@@ -154,39 +271,32 @@ def _are_words_strongly_related(c1, c2):
     min_len = max(1, min(len(pids1), len(pids2)))
     union_len = max(1, len(pids1 | pids2))
 
-    # 고리 1: 글자 뿌리 / 은어 변형
     short, long = (w1, w2) if len(w1) <= len(w2) else (w2, w1)
     if len(short) >= 2 and (long.startswith(short) or long.endswith(short)):
         return True
     if len(w1) == len(w2) and len(w1) >= 4 and sum(a != b for a, b in zip(w1, w2)) == 1:
         return True
-    # 공통 접미사 2글자 이상 (예: 1호선/2호선/4호선 -> '호선', 핫걸단/큣걸단 -> '걸단')
     if len(w1) >= 3 and len(w2) >= 3 and w1[-2:] == w2[-2:] and inter >= 1:
         return True
-    # '붕어빵' <-> '슈붕'/'팥붕' 처럼 특수 줄임말이 같이 쓰이면서 글자를 공유할 때
     if inter >= 1 and (short[0] in long or short[-1] in long):
         return True
 
-    # 상시어(멤버 이름, 버블, 갤벤 등)가 다른 독립 토픽(반바지, 성대모사, 방탈출 등)을 흡수하지 못하도록 차단
     if (w1 in _BRIDGE_STOPWORDS) != (w2 in _BRIDGE_STOPWORDS):
         if (inter / min_len) < 0.55 or inter < 4:
             return False
 
-    # 고리 2: 엄격한 직접 게시글 동시출현 (최소 3건 이상 + 작은 쪽의 32% 이상 또는 전체의 20% 이상 공유)
-    if inter >= 3 and ((inter / min_len) >= 0.32 or (inter / union_len) >= 0.20):
+    if inter >= 3 and ((inter / min_len) >= 0.30 or (inter / union_len) >= 0.18):
         return True
 
     return False
 
 
 def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, target_hours=1,
-                          routine_days=None, min_posts=5, max_words=15):
+                          routine_days=None, min_posts=5, max_words=15, learned_rules=None):
     """
     1단계: 각 게시글의 단어 노트를 만들고 평소(24h) 대비 급상승한 단어 후보들을 추출
-    - 1인 꼬리말/서명/도배 완벽 차단:
-      1) 동일 작성자(author_code 또는 nickname)가 한 윈도우에서 같은 단어를 최대 2번까지만 인정(캡핑)
-      2) 최소 4명 이상의 서로 다른 작성자가 언급해야 하며, 특정 1인의 지분이 45%를 넘으면 제외
-      3) 제목에는 한 번도(또는 1번만) 안 나오고 본문(꼬리말/짤방 텍스트)에만 반복 등장하는 단어 제외
+    - 접두사/접미사 합성어 패밀리 통합을 먼저 수행하여 파편화된 신조어(예: 예빈김밥/메이김밥/157김밥) 누락 방지
+    - 학습 노트(learned_rules)의 상시 반복어(routine_words)는 일반 변동 시 제외하되, 6.5배 이상 대폭발 시 안전장치로 통과!
     """
     post_map = {}
     post_notes = {}
@@ -196,19 +306,21 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
     target_word_authors = defaultdict(set)
     target_word_author_counts = defaultdict(Counter)
 
+    routine_words = (learned_rules or {}).get("routine_words", set())
+    protected_words = (learned_rules or {}).get("protected", set())
+
     for p in target_posts:
         pid, title, content, created_at = p[0], p[1], p[2], p[3]
         author = (p[4] or "").strip() if len(p) > 4 else ""
         if is_ritual_title(title):
             continue
         post_map[pid] = p
-        title_note = extract_words(title, "")
-        full_note = extract_words(title, content)
+        title_note = extract_words(title, "", learned_rules=learned_rules)
+        full_note = extract_words(title, content, learned_rules=learned_rules)
         post_notes[pid] = full_note
         t_clean = re.sub(r'\s+', '', title or '')
 
         for w in full_note:
-            # 한 유저가 꼬리말/도배로 같은 단어를 11번 쓰더라도 작성자당 최대 2건까지만 카운트!
             if author and not author.startswith("anon_"):
                 if target_word_author_counts[w][author] >= 2:
                     continue
@@ -224,55 +336,68 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
     for p in baseline_posts:
         if is_ritual_title(p[1]):
             continue
-        for w in extract_words(p[1], p[2]):
+        for w in extract_words(p[1], p[2], learned_rules=learned_rules):
             base_df[w] += 1
 
     n_target = max(1, len(post_map))
     n_base = max(1, sum(1 for p in baseline_posts if not is_ritual_title(p[1])))
 
-    cands = {}
+    # 합성어 파편화 방지를 위해 2건 이상 등장한 단어들을 후보로 올린 뒤 패밀리 병합 수행
+    raw_cands = {}
     for w, pids in target_word_posts.items():
         df = len(pids)
-        if df < max(3, min_posts - 1):
+        if df < 2:
             continue
-        # 제목에는 거의 안 나오고 본문(개인 꼬리말/서명)에서만 카운트된 단어 차단
-        if target_word_title_hits[w] < 2 and (target_word_title_hits[w] / df) < 0.25:
-            continue
-        titles = target_word_titles[w]
-        diversity = len(set(titles)) / len(titles)
-        if diversity < 0.6:
-            continue
-        authors = target_word_authors.get(w, set())
-        if authors:
-            if len(authors) < 4:
-                continue
-            top_author_cnt = target_word_author_counts[w].most_common(1)[0][1]
-            if (top_author_cnt / df) > 0.45:
-                continue
-        cands[w] = {
+        raw_cands[w] = {
             "word": w,
             "post_ids": set(pids),
-            "authors": set(authors),
+            "authors": set(target_word_authors.get(w, set())),
             "author_counts": Counter(target_word_author_counts[w]),
+            "title_hits": target_word_title_hits[w],
+            "titles": list(target_word_titles[w]),
             "variants": set(),
+            "variant_counts": Counter({w: df}),
             "base_cnt": base_df[w],
         }
 
-    cands = merge_prefix_family(cands)
+    cands = merge_word_families(raw_cands)
+
     final_cands = []
     for w, c in cands.items():
-        df = len(c["post_ids"])
+        pids = c["post_ids"]
+        df = len(pids)
         if df < min_posts:
             continue
-        if c["authors"] and len(c["authors"]) < 4:
+        if c["title_hits"] < 2 and (c["title_hits"] / df) < 0.25:
             continue
+        titles = c["titles"]
+        diversity = len(set(titles)) / max(1, len(titles))
+        if diversity < 0.55:
+            continue
+        authors = c["authors"]
+        if authors:
+            if len(authors) < 4:
+                continue
+            top_author_cnt = c["author_counts"].most_common(1)[0][1]
+            if (top_author_cnt / df) > 0.45:
+                continue
+
+        # 패밀리 내 변형어들의 baseline 합산 (과대 추정 방지용 상한 적용)
+        family_words = {w} | c["variants"]
+        base_cnt = min(sum(base_df[fw] for fw in family_words), max(c["base_cnt"], int(sum(base_df[fw] for fw in family_words) * 0.75)))
+
         p_t = df / n_target
-        p_b = c["base_cnt"] / n_base
+        p_b = base_cnt / n_base
         lift = (p_t + 0.002) / (p_b + 0.002)
         expected = p_b * n_target
         z = (df - expected) / math.sqrt(max(1.0, expected))
 
-        if routine_days and routine_days.get(w, 0) >= 4 and lift < 6:
+        # 학습 노트의 24시간 상시 반복어(routine_words) 필터링 (단, 6.5배 이상 대폭발 시 안전장치로 허용!)
+        if w in routine_words and w not in protected_words:
+            if lift < 6.5 or z < 5.0:
+                continue
+
+        if routine_days and routine_days.get(w, 0) >= 4 and lift < 6.0:
             continue
         if lift < 2.8 or z < 3.2:
             continue
@@ -283,39 +408,177 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
         c["score"] = round(z * math.log2(lift + 1), 2)
         final_cands.append(c)
 
-    ranked = sorted(final_cands, key=lambda x: x["score"], reverse=True)[:max_words]
+    ranked = sorted(
+        final_cands,
+        key=lambda x: (x["word"] not in _BRIDGE_STOPWORDS, x["score"]),
+        reverse=True,
+    )[:max(max_words, 20)]
     return ranked, post_map, post_notes, base_df, n_target, n_base
 
 
+def _build_cluster_representation(comp, union_pids, assoc_kws, post_map, post_notes):
+    """클러스터의 대표 키워드(합성어 인기 변형 포함), 대표 게시글 요약, 제목 문자열 생성"""
+    # 핵심어 및 패밀리 내 주요 변형어(3건 이상 등장한 구체 합성어: 예빈이김밥, 메이김밥 등) 펼치기
+    display_core = []
+    seen_words = set()
+    for c in comp:
+        # 패밀리 변형어 중 어근과 2글자 이상 차이 나는 구체적 합성어(예: 김밥 -> 예빈이김밥, 메이김밥, 157김밥)만 함께 노출
+        # (1글자 조사/어미 파생어인 '가사인' 등이 '가사' 옆에 중복 노출되는 현상 방지)
+        compound_vars = [
+            vw for vw, vcnt in c.get("variant_counts", Counter()).most_common(4)
+            if vw != c["word"] and vcnt >= 3 and abs(len(vw) - len(c["word"])) >= 2
+        ]
+        top_vars = [c["word"]] + compound_vars[:2]
+
+        for tw in top_vars:
+            if tw not in seen_words:
+                seen_words.add(tw)
+                v_cnt = c.get("variant_counts", {}).get(tw, c["doc_count"])
+                display_core.append({
+                    "word": tw,
+                    "lift": c["lift"],
+                    "count": v_cnt if len(top_vars) > 1 and tw != c["word"] else c["doc_count"],
+                })
+
+    keywords = display_core[:4] + assoc_kws[:2]
+    all_variants = {v for c in comp for v in c.get("variants", ())} | {c["word"] for c in comp}
+
+    cluster_times = [post_map[pid][3] for pid in union_pids if pid in post_map]
+    actual_start = min(cluster_times)
+    actual_end = max(cluster_times)
+
+    kw_set = {k["word"] for k in keywords} | all_variants
+    scored_pids = sorted(
+        union_pids,
+        key=lambda pid: (
+            len(post_notes.get(pid, set()) & kw_set),
+            len((post_map[pid][1] or "").strip()),
+            pid,
+        ),
+        reverse=True,
+    )
+    rep_titles = []
+    seen_t = set()
+    for pid in scored_pids:
+        t_str = (post_map[pid][1] or "").strip()
+        t_key = re.sub(r'\s+', '', t_str)
+        if not t_str or t_key in seen_t:
+            continue
+        seen_t.add(t_key)
+        ts_str = post_map[pid][3].strftime("%H:%M")
+        rep_titles.append(f"• [{ts_str}] {t_str}")
+        if len(rep_titles) >= 4:
+            break
+
+    core_label = " · ".join(k["word"] for k in display_core[:3])
+    assoc_label = " · ".join(a["word"] for a in assoc_kws[:2] if a["word"] not in seen_words)
+    if assoc_label:
+        title = f"[{core_label}] + {assoc_label} 관련 토픽"
+    else:
+        title = f"[{core_label}] 급상승 토픽"
+
+    mood = " ".join(f"#{k['word']}" for k in keywords[:4])
+    return {
+        "title": title,
+        "summary": "\n".join(rep_titles),
+        "mood": mood,
+        "keywords": keywords,
+        "post_count": len(union_pids),
+        "sample_post_ids": sorted(union_pids, reverse=True)[:50],
+        "actual_start": actual_start,
+        "actual_end": actual_end,
+        "score": sum(c["score"] for c in comp[:2]),
+        "_comp": comp,
+        "_union_pids": union_pids,
+        "_assoc_kws": assoc_kws,
+        "_rep_titles": set(rep_titles),
+    }
+
+
+def consolidate_overlapping_clusters(clusters, post_map, post_notes):
+    """
+    동시간대 중복/파편화 클러스터 병합:
+    - 같은 시간대 윈도우에서 게시글 풀이 22% 이상 겹치거나,
+    - 대표 요약 게시글(rep_titles)이 1건이라도 겹치거나,
+    - 핵심/연관 키워드가 서로 겹치는 하위 클러스터를 상위 클러스터로 흡수!
+    """
+    if len(clusters) <= 1:
+        return clusters
+
+    clusters.sort(key=lambda x: (x["post_count"], x["score"]), reverse=True)
+    merged_flags = set()
+    result = []
+
+    for i in range(len(clusters)):
+        if i in merged_flags:
+            continue
+        main_c = clusters[i]
+        comp = list(main_c["_comp"])
+        union_pids = set(main_c["_union_pids"])
+        assoc_kws = list(main_c["_assoc_kws"])
+        rep_set = set(main_c["_rep_titles"])
+        kw_words = {k["word"] for k in main_c["keywords"]}
+
+        for j in range(i + 1, len(clusters)):
+            if j in merged_flags:
+                continue
+            sub_c = clusters[j]
+            sub_pids = sub_c["_union_pids"]
+            inter_pids = len(union_pids & sub_pids)
+            min_pids = max(1, min(len(union_pids), len(sub_pids)))
+            sub_kw_words = {k["word"] for k in sub_c["keywords"]}
+
+            overlap_ratio = inter_pids / min_pids
+            shares_summary = bool(rep_set & sub_c["_rep_titles"])
+            shares_keyword = bool(kw_words & sub_kw_words)
+
+            if overlap_ratio >= 0.22 or shares_summary or shares_keyword:
+                # 하위 클러스터의 핵심어를 메인 클러스터에 편입
+                comp.extend(sub_c["_comp"])
+                union_pids |= sub_pids
+                for ak in sub_c["_assoc_kws"]:
+                    if ak["word"] not in kw_words:
+                        assoc_kws.append(ak)
+                rep_set |= sub_c["_rep_titles"]
+                kw_words |= sub_kw_words
+                merged_flags.add(j)
+
+        rebuilt = _build_cluster_representation(comp, union_pids, assoc_kws, post_map, post_notes)
+        # 내부 임시 키 제거
+        for k in ("_comp", "_union_pids", "_assoc_kws", "_rep_titles"):
+            rebuilt.pop(k, None)
+        result.append(rebuilt)
+
+    return result
+
+
 def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, target_hours=1.5,
-                             min_posts=5, min_cluster_posts=7):
+                             min_posts=5, min_cluster_posts=7, learned_rules=None):
     """
     2단계 (메인 엔진 — LLM 무사용):
-    급상승 단어 후보들을 3가지 연관성 고리로 묶어 '떡밥 단어 덩어리(Cluster)'를 만들고,
-    그 덩어리에 속한 게시글들의 단어 노트에서 함께 등장한 보조 연관어(모델, 광고, 커피차, 유튜브 등)를 추출한다.
+    급상승 단어 후보들을 연관성 고리로 묶어 '떡밥 단어 덩어리(Cluster)'를 만들고,
+    동시간대 중복 클러스터까지 깔끔하게 병합한다.
     """
     cands, post_map, post_notes, base_df, n_target, n_base = find_burst_candidates(
         target_posts, baseline_posts,
         baseline_hours=baseline_hours, target_hours=target_hours,
-        min_posts=min_posts, max_words=15,
+        min_posts=min_posts, max_words=15, learned_rules=learned_rules,
     )
     if not cands:
         return []
 
-    # Star-Clustering (중심축 직접 연결 방식):
-    # A-B가 연결되고 B-C가 연결되었다고 해서 A-B-C를 다리 건너 합치지 않고,
-    # 점수가 가장 높은 중심 단어(Anchor)와 '직접' 강하게 연결된 단어들만 한 클러스터로 묶는다!
+    routine_words = (learned_rules or {}).get("routine_words", set())
+    protected_words = (learned_rules or {}).get("protected", set())
+
     cands.sort(key=lambda x: (x["word"] not in _BRIDGE_STOPWORDS, x["score"], x["doc_count"]), reverse=True)
     n = len(cands)
     used = set()
-    clusters = []
+    raw_clusters = []
 
     for i in range(n):
         if i in used:
             continue
         anchor = cands[i]
-        # 상시어(버블, 갤벤, 멤버 이름 등)는 단독 클러스터의 중심축(Anchor)이 될 수 없도록 스킵!
-        # (예: '버블 100일' 토픽이 있을 때 '버블' 단독 토픽이 또 생기는 현상 방지)
         if anchor["word"] in _BRIDGE_STOPWORDS and anchor["lift"] < 12.0:
             continue
 
@@ -325,12 +588,10 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
         for j in range(i + 1, n):
             if j in used:
                 continue
-            # 중심축(anchor)과 직접 강하게 연결되어 있을 때만 편입
             if _are_words_strongly_related(anchor, cands[j]):
                 comp.append(cands[j])
                 used.add(j)
 
-        # 점수/빈도 순 정렬 (단, 상시어보다 고유 토픽어가 앞으로 오도록 정렬)
         comp.sort(key=lambda x: (x["word"] not in _BRIDGE_STOPWORDS, x["doc_count"], x["score"]), reverse=True)
         union_pids = set()
         union_authors = set()
@@ -343,7 +604,6 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
         if union_authors and len(union_authors) < 4:
             continue
 
-        # 덩어리 내 게시글들의 단어 노트에서 함께 자주 쓰인 연관어(Co-occurring words) 추출 (작성자당 최대 2회 캡핑)
         core_words = {c["word"] for c in comp}
         all_variants = {v for c in comp for v in c.get("variants", ())}
         assoc_counter = Counter()
@@ -353,7 +613,9 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
             for w in post_notes.get(pid, ()):
                 if w in core_words or w in all_variants:
                     continue
-                if any(w.startswith(cw) or cw.startswith(w) for cw in core_words):
+                if w in routine_words and w not in protected_words:
+                    continue
+                if any(w.startswith(cw) or cw.startswith(w) or w.endswith(cw) or cw.endswith(w) for cw in core_words):
                     continue
                 if p_author and not p_author.startswith("anon_"):
                     if assoc_author_cnt[w][p_author] >= 2:
@@ -364,7 +626,6 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
         assoc_kws = []
         min_assoc_cnt = max(3, int(len(union_pids) * 0.16))
         for w, cnt in assoc_counter.most_common(10):
-            # 클러스터 게시글의 최소 16% 이상(최소 3건)에서 함께 등장하고, 평소 대비 의미 있는 단어만 채택
             if cnt < min_assoc_cnt:
                 continue
             p_t = cnt / n_target
@@ -384,61 +645,135 @@ def build_word_note_clusters(target_posts, baseline_posts, baseline_hours=24, ta
             if len(assoc_kws) >= 2:
                 break
 
-        # 전체 키워드 리스트 (핵심 급상승어 + 단어 노트 동반 연관어)
-        keywords = [
-            {"word": c["word"], "lift": c["lift"], "count": c["doc_count"]}
-            for c in comp[:4]
-        ] + assoc_kws
+        raw_clusters.append(_build_cluster_representation(comp, union_pids, assoc_kws, post_map, post_notes))
 
-        # 이 떡밥 덩어리의 실제 발생 시작~종료 시간 계산
-        cluster_times = [post_map[pid][3] for pid in union_pids if pid in post_map]
-        actual_start = min(cluster_times)
-        actual_end = max(cluster_times)
+    consolidated = consolidate_overlapping_clusters(raw_clusters, post_map, post_notes)
+    consolidated.sort(key=lambda x: (x["post_count"], x["score"]), reverse=True)
+    return consolidated[:3]
 
-        # 대표 게시글 선정: 핵심어/연관어를 가장 많이 포함한 게시글 순으로 중복 제목 없이 4건 추출
-        kw_set = {k["word"] for k in keywords} | all_variants
-        scored_pids = sorted(
-            union_pids,
-            key=lambda pid: (
-                len(post_notes.get(pid, set()) & kw_set),
-                len((post_map[pid][1] or "").strip()),
-                pid,
-            ),
-            reverse=True,
-        )
-        rep_titles = []
-        seen_t = set()
-        for pid in scored_pids:
-            t_str = (post_map[pid][1] or "").strip()
-            t_key = re.sub(r'\s+', '', t_str)
-            if not t_str or t_key in seen_t:
-                continue
-            seen_t.add(t_key)
-            ts_str = post_map[pid][3].strftime("%H:%M")
-            rep_titles.append(f"• [{ts_str}] {t_str}")
-            if len(rep_titles) >= 4:
-                break
 
-        core_label = " · ".join(c["word"] for c in comp[:3])
-        assoc_label = " · ".join(a["word"] for a in assoc_kws[:2])
-        if assoc_label:
-            title = f"[{core_label}] + {assoc_label} 관련 토픽"
-        else:
-            title = f"[{core_label}] 급상승 토픽"
+def extract_learning_candidates_from_24h(posts_24h, protected_words=None):
+    """
+    최근 24시간 데이터로부터 자동 학습 노트(Learning Note) 규칙 후보 추출:
+    1) signature_phrase: 본문에서 8회 이상 똑같이 반복 복붙되는 12자 이상 고정 문구/꼬리말
+    2) routine_word: 24시간 중 10개 이상의 시간대에 걸쳐 고르게 등장(피크 시간 비중 <= 22%)하는 일상 상시어
+    3) ritual_word: 시보/출첵/인증 등 루틴성 게시글에서 60% 이상의 비율로 반복 등장하는 상투 어휘
+    """
+    protected = protected_words or set()
+    learned_items = []
 
-        mood = " ".join(f"#{k['word']}" for k in keywords[:4])
+    # 1. 반복 복붙 꼬리말 / 서명문 (signature_phrase) 감지
+    line_counter = Counter()
+    line_authors = defaultdict(set)
+    line_sample = {}
 
-        clusters.append({
-            "title": title,
-            "summary": "\n".join(rep_titles),
-            "mood": mood,
-            "keywords": keywords,
-            "post_count": len(union_pids),
-            "sample_post_ids": sorted(union_pids, reverse=True)[:50],
-            "actual_start": actual_start,
-            "actual_end": actual_end,
-            "score": sum(c["score"] for c in comp[:2]),
+    for p in posts_24h:
+        pid, title, content, created_at = p[0], p[1], p[2], p[3]
+        author = (p[4] or "").strip() if len(p) > 4 else ""
+        if not content or content == "__EMPTY__":
+            continue
+        text = re.sub(r'<br\s*/?>', '\n', content, flags=re.I)
+        text = re.sub(r'<[^>]+>', '', text)
+        text = html.unescape(text)
+        for line in text.split('\n'):
+            line_s = line.strip()
+            if len(line_s) >= 12 and not line_s.startswith("http"):
+                line_counter[line_s] += 1
+                if author:
+                    line_authors[line_s].add(author)
+                if line_s not in line_sample:
+                    line_sample[line_s] = f"[{created_at.strftime('%H:%M')}] {title}"
+
+    detected_sigs = []
+    for line_s, cnt in line_counter.most_common(40):
+        if cnt < 8:
+            break
+        u_cnt = max(1, len(line_authors[line_s]))
+        detected_sigs.append(line_s)
+        learned_items.append({
+            "pattern_type": "signature_phrase",
+            "target_text": line_s,
+            "hit_count": cnt,
+            "hour_spread": 24,
+            "author_count": u_cnt,
+            "max_lift": 1.0,
+            "reason": f"최근 24시간 내 동일 문구 {cnt}회 반복 복붙 감지 ({u_cnt}명 사용)",
+            "sample_text": line_sample.get(line_s, ""),
         })
 
-    clusters.sort(key=lambda x: (x["post_count"], x["score"]), reverse=True)
-    return clusters[:3]
+    # 2. 24시간 전 시간대 분산 상시어 (routine_word) 및 루틴/인증어 (ritual_word) 감지
+    word_total_df = Counter()
+    word_ritual_df = Counter()
+    word_hour_counts = defaultdict(Counter)
+    word_authors = defaultdict(set)
+    word_sample = {}
+    hour_author_cap = defaultdict(Counter)
+
+    temp_rules = {"signatures": detected_sigs, "stopwords": set(), "protected": protected}
+
+    for p in posts_24h:
+        pid, title, content, created_at = p[0], p[1], p[2], p[3]
+        author = (p[4] or "").strip() if len(p) > 4 else ""
+        hr = created_at.hour
+        ritual_flag = is_ritual_title(title)
+
+        words = extract_words(title, content, learned_rules=temp_rules)
+        for w in words:
+            if w in protected or w in _BRIDGE_STOPWORDS:
+                continue
+            # 시간당 동일 유저 최대 2회 캡핑
+            if author and not author.startswith("anon_"):
+                if hour_author_cap[(w, hr)][author] >= 2:
+                    continue
+                hour_author_cap[(w, hr)][author] += 1
+                word_authors[w].add(author)
+
+            word_total_df[w] += 1
+            word_hour_counts[w][hr] += 1
+            if ritual_flag:
+                word_ritual_df[w] += 1
+            if w not in word_sample:
+                word_sample[w] = f"[{created_at.strftime('%H:%M')}] {title}"
+
+    total_hours_present = max(1, len({p[3].hour for p in posts_24h}))
+    min_spread = max(6, min(10, int(total_hours_present * 0.55)))
+
+    for w, total_cnt in word_total_df.most_common(300):
+        if total_cnt < 15:
+            break
+        u_cnt = len(word_authors[w])
+        hr_buckets = word_hour_counts[w]
+        spread = len(hr_buckets)
+        peak_cnt = max(hr_buckets.values()) if hr_buckets else total_cnt
+        peak_ratio = peak_cnt / max(1, total_cnt)
+        ritual_cnt = word_ritual_df[w]
+        ritual_ratio = ritual_cnt / max(1, total_cnt)
+
+        # 규칙 A: 루틴/인증성 게시글에서 절반 이상 등장하는 상투어
+        if ritual_cnt >= 8 and ritual_ratio >= 0.55:
+            learned_items.append({
+                "pattern_type": "ritual_word",
+                "target_text": w,
+                "hit_count": total_cnt,
+                "hour_spread": spread,
+                "author_count": u_cnt,
+                "max_lift": round(peak_ratio * 10, 1),
+                "reason": f"시보·인증·루틴성 글에서 집중 반복 ({total_cnt}건 중 {int(ritual_ratio * 100)}%가 루틴 문맥)",
+                "sample_text": word_sample.get(w, ""),
+            })
+            continue
+
+        # 규칙 B: 특정 시간 피크 없이 하루 종일(min_spread개 이상 시간대) 평평하게 깔리는 일상 상시어
+        if total_cnt >= 22 and spread >= min_spread and peak_ratio <= 0.22:
+            learned_items.append({
+                "pattern_type": "routine_word",
+                "target_text": w,
+                "hit_count": total_cnt,
+                "hour_spread": spread,
+                "author_count": u_cnt,
+                "max_lift": round(peak_ratio * 10, 1),
+                "reason": f"24시간 중 {spread}개 시간대에 고르게 분산 등장 (총 {total_cnt}건, 피크 시간 비중 {int(peak_ratio * 100)}%로 일상 상시어 판정 · 단 6.5x 폭발 시 예외 통과)",
+                "sample_text": word_sample.get(w, ""),
+            })
+
+    return learned_items

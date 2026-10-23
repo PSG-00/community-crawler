@@ -2,7 +2,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from database import get_db
-from topic_engine import build_word_note_clusters
+from topic_engine import build_word_note_clusters, extract_learning_candidates_from_24h
 
 KST = timezone(timedelta(hours=9))
 
@@ -37,18 +37,102 @@ class TopicAnalyzer:
                 cur.execute(query, (self.gallery_id, start_dt, end_dt))
                 return cur.fetchall()
 
+    def load_learned_rules(self):
+        """DB의 learning_notes 테이블에서 현재 활성화된 학습 규칙과 보호 단어(화이트리스트) 로드"""
+        rules = {
+            "signatures": [],
+            "stopwords": set(),
+            "routine_words": set(),
+            "protected": set(),
+        }
+        try:
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT pattern_type, target_text, status
+                        FROM learning_notes
+                        WHERE gallery_id = %s
+                    """, (self.gallery_id,))
+                    for p_type, text, status in cur.fetchall():
+                        if not text:
+                            continue
+                        if status == "protected":
+                            rules["protected"].add(text)
+                        elif status == "active":
+                            if p_type == "signature_phrase":
+                                rules["signatures"].append(text)
+                            elif p_type in ("ritual_word", "manual_stop"):
+                                rules["stopwords"].add(text)
+                            elif p_type == "routine_word":
+                                rules["routine_words"].add(text)
+        except Exception as e:
+            log("학습노트", f"학습 규칙 로드 오류: {e}")
+        return rules
+
+    def sync_learning_notes(self, end_dt=None):
+        """최근 24시간 게시글에서 반복 복붙 꼬리말·상시 반복어·루틴어를 자동 학습하여 DB에 동기화"""
+        if end_dt is None:
+            end_dt = get_now_kst()
+        start_dt = end_dt - timedelta(hours=24)
+        posts_24h = self.fetch_posts_between(start_dt, end_dt)
+        if len(posts_24h) < 30:
+            return 0
+
+        current_rules = self.load_learned_rules()
+        candidates = extract_learning_candidates_from_24h(
+            posts_24h, protected_words=current_rules["protected"]
+        )
+        if not candidates:
+            return 0
+
+        upserted = 0
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                for item in candidates:
+                    # 이미 관리자가 protected 나 disabled 로 지정한 항목은 status를 덮어쓰지 않고 통계만 갱신!
+                    cur.execute("""
+                        INSERT INTO learning_notes (
+                            gallery_id, pattern_type, target_text, status,
+                            hit_count, hour_spread, author_count, max_lift,
+                            reason, sample_text, is_manual, updated_at
+                        )
+                        VALUES (%s, %s, %s, 'active', %s, %s, %s, %s, %s, %s, FALSE, NOW())
+                        ON CONFLICT (gallery_id, pattern_type, target_text)
+                        DO UPDATE SET
+                            hit_count = EXCLUDED.hit_count,
+                            hour_spread = EXCLUDED.hour_spread,
+                            author_count = EXCLUDED.author_count,
+                            max_lift = EXCLUDED.max_lift,
+                            reason = CASE WHEN learning_notes.is_manual THEN learning_notes.reason ELSE EXCLUDED.reason END,
+                            sample_text = EXCLUDED.sample_text,
+                            updated_at = NOW();
+                    """, (
+                        self.gallery_id,
+                        item["pattern_type"],
+                        item["target_text"],
+                        item["hit_count"],
+                        item["hour_spread"],
+                        item["author_count"],
+                        item["max_lift"],
+                        item["reason"],
+                        item["sample_text"],
+                    ))
+                    upserted += 1
+            conn.commit()
+        log("학습노트", f"📒 최근 24시간 패턴 학습 완료 ({upserted}개 항목 갱신)")
+        return upserted
+
     def save_event(self, start_dt, end_dt, cluster_id, event_info):
         """
         gallery_events 테이블에 저장:
-        - 서로 다른 토픽이 억지로 합쳐지지 않도록 45분 이내 인접 구간이면서
-          '1순위 핵심 키워드(Anchor)'가 같거나 어근이 같은 경우에만 병합!
-        - 병합 시 다른 토픽 키워드가 눈덩이처럼 누적되지 않도록 피크 구간의 깔끔한 키워드 세트를 유지
+        - 45분 이내 인접 구간이면서 핵심어가 겹치거나, 게시글 풀(sample_post_ids)이 25% 이상 겹치는 경우 동일 토픽으로 병합!
         """
         kw_json = json.dumps(event_info["keywords"], ensure_ascii=False)
         core_names = [k["word"] for k in event_info["keywords"] if not k.get("is_assoc")]
         if not core_names:
             core_names = [k["word"] for k in event_info["keywords"]]
         top_word = core_names[0] if core_names else ""
+        new_pids_set = set(event_info.get("sample_post_ids") or [])
 
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -77,9 +161,12 @@ class TopicAnalyzer:
                         old_core = [k["word"] if isinstance(k, dict) else str(k) for k in old_kws]
                     old_top = old_core[0] if old_core else ""
 
-                    # 핵심어(Core keywords)나 주요 연관어가 겹치거나, 어근 포함관계(우이은행<->우리은행)일 때 동일 토픽으로 병합
                     all_new_words = {k["word"] for k in event_info["keywords"]}
                     all_old_words = {k["word"] if isinstance(k, dict) else str(k) for k in old_kws}
+                    old_pids_set = set(old_pids or [])
+                    min_pid_len = max(1, min(len(new_pids_set), len(old_pids_set)))
+                    pid_overlap = len(new_pids_set & old_pids_set) / min_pid_len if (new_pids_set and old_pids_set) else 0.0
+
                     is_same_topic = False
                     if top_word and old_top:
                         if top_word == old_top:
@@ -88,14 +175,16 @@ class TopicAnalyzer:
                             is_same_topic = True
                         elif (top_word in all_old_words) or (old_top in all_new_words):
                             is_same_topic = True
-                        elif len(set(core_names[:3]) & set(old_core[:3])) >= 2:
+                        elif len(set(core_names[:3]) & set(old_core[:3])) >= 1 and pid_overlap >= 0.15:
+                            is_same_topic = True
+                        elif pid_overlap >= 0.28:
                             is_same_topic = True
 
                     if is_same_topic:
                         new_start = min(old_w_start, start_dt)
                         new_end = max(old_w_end, end_dt)
                         merged_pids = sorted(
-                            set(old_pids or []) | set(event_info["sample_post_ids"] or []),
+                            old_pids_set | new_pids_set,
                             reverse=True,
                         )[:60]
                         new_cnt = max(old_cnt, event_info["post_count"], len(merged_pids))
@@ -154,11 +243,9 @@ class TopicAnalyzer:
             conn.commit()
         return new_id
 
-    def analyze_window(self, end_dt=None, window_minutes=90):
+    def analyze_window(self, end_dt=None, window_minutes=90, learned_rules=None):
         """
-        LLM 무사용 100% 단어 노트 & 동시출현 연관성 클러스터 분석:
-        - 90분 슬라이딩 윈도우(30분 간격 중첩)로 경계에 걸친 토픽도 놓치지 않고 포착
-        - 클러스터 내 실제 첫 글~마지막 글 시각(actual_start ~ actual_end)을 이벤트 시간대로 기록
+        LLM 무사용 100% 단어 노트 & 동시출현 연관성 클러스터 분석 (학습 노트 연동)
         """
         if end_dt is None:
             end_dt = get_now_kst()
@@ -169,6 +256,9 @@ class TopicAnalyzer:
         if len(target_posts) < 12:
             return []
 
+        if learned_rules is None:
+            learned_rules = self.load_learned_rules()
+
         baseline_posts = self.fetch_posts_between(baseline_start, start_dt)
         clusters = build_word_note_clusters(
             target_posts, baseline_posts,
@@ -176,6 +266,7 @@ class TopicAnalyzer:
             target_hours=window_minutes / 60.0,
             min_posts=5,
             min_cluster_posts=7,
+            learned_rules=learned_rules,
         )
         if not clusters:
             return []
@@ -193,8 +284,16 @@ class TopicAnalyzer:
         return saved_events
 
     def reset_and_regenerate_24h(self):
-        """기존 트렌드 초기화 후 최근 24시간을 30분 간격(90분 중첩 윈도우)으로 초고속 재구축 (LLM 무사용, ~2초 소요)"""
-        log("재구축", "🧹 기존 트렌드 타임라인 초기화 및 최근 24시간 단어노트 연관성 클러스터 재구축 시작...")
+        """24시간 데이터로부터 학습 노트(Learning Note)를 먼저 갱신한 뒤, 최근 24시간 토픽을 초고속 재구축"""
+        log("재구축", "📒 1단계: 최근 24시간 데이터 패턴 자동 학습(Learning Note) 동기화 시작...")
+        try:
+            self.sync_learning_notes()
+        except Exception as e:
+            log("학습노트오류", f"패턴 학습 중 오류: {e}")
+
+        learned_rules = self.load_learned_rules()
+
+        log("재구축", "🧹 2단계: 기존 트렌드 타임라인 초기화 및 최근 24시간 클러스터 재구축 시작...")
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("TRUNCATE gallery_events RESTART IDENTITY;")
@@ -203,28 +302,35 @@ class TopicAnalyzer:
         now_k = get_now_kst()
         total_created = 0
 
-        # 30분 단위 슬라이딩(90분 창)으로 24시간(48개 구간) 시간순 스캔 -> 경계 잘림 완벽 해결
         for step in range(48, -1, -1):
             target_end = now_k - timedelta(minutes=30 * step)
             try:
-                events = self.analyze_window(end_dt=target_end, window_minutes=90)
+                events = self.analyze_window(
+                    end_dt=target_end, window_minutes=90, learned_rules=learned_rules
+                )
                 total_created += len(events)
             except Exception as e:
                 log("재구축오류", f"{step * 30}분 전 구간 오류: {e}")
 
         log("재구축", f"🎉 최근 24시간 주요 급상승 토픽 총 {total_created}건 초고속 재구축 완료!")
+        return total_created
 
 
 def run_analyzer_loop():
-    """10분 간격 실시간 단어 노트 트렌드 감지 워커 (API 제한 없음)"""
+    """10분 간격 실시간 단어 노트 트렌드 감지 및 주기적 학습 노트 갱신 워커"""
     analyzer = TopicAnalyzer(gallery_id="rescene1")
-    log("트렌드감지기", "🚀 순수 단어노트 & 연관성 클러스터 트렌드 감지 워커 시작 (No-LLM)")
+    log("트렌드감지기", "🚀 단어노트 & 학습노트(Learning Note) 기반 트렌드 감지 워커 시작")
 
     analyzer.reset_and_regenerate_24h()
 
+    cycle = 0
     while True:
-        time.sleep(600)  # 10분마다 실행 (LLM 쿼터 제약이 없으므로 더 빠르게 감지)
+        time.sleep(600)  # 10분마다 실행
+        cycle += 1
         try:
+            # 30분(3사이클)마다 최근 24시간 학습 노트 자동 업데이트
+            if cycle % 3 == 0:
+                analyzer.sync_learning_notes()
             analyzer.analyze_window(end_dt=get_now_kst(), window_minutes=90)
         except Exception as e:
             log("트렌드감지기", f"분석 오류: {e}")

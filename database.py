@@ -73,6 +73,26 @@ def init_db():
 
     -- 기준 미달(8건 미만) 소규모 잡담 이벤트 정리
     DELETE FROM gallery_events WHERE post_count < 8;
+
+    -- 실시간 떡밥 분석기 자동/수동 학습 노트 테이블
+    CREATE TABLE IF NOT EXISTS learning_notes (
+        note_id SERIAL PRIMARY KEY,
+        gallery_id VARCHAR(50) NOT NULL DEFAULT 'rescene1',
+        pattern_type VARCHAR(30) NOT NULL,
+        target_text TEXT NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'active',
+        hit_count INT NOT NULL DEFAULT 0,
+        hour_spread INT NOT NULL DEFAULT 0,
+        author_count INT NOT NULL DEFAULT 0,
+        max_lift FLOAT NOT NULL DEFAULT 0.0,
+        reason TEXT,
+        sample_text TEXT,
+        is_manual BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+        UNIQUE(gallery_id, pattern_type, target_text)
+    );
+    CREATE INDEX IF NOT EXISTS idx_learning_notes_gallery_status ON learning_notes (gallery_id, status);
     """
     with get_db() as conn:
         with conn.cursor() as cur:

@@ -2,15 +2,27 @@ import time
 import html
 import re
 import json
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from database import get_db
+from analyzer import TopicAnalyzer
 
 app = FastAPI(title="DC Inside Community 90-Day Archive Search")
 templates = Jinja2Templates(directory="templates")
+
+ADMIN_PASSWORD = "remine0326"
+ADMIN_TOKEN = hashlib.sha256(f"rescene_admin_{ADMIN_PASSWORD}".encode()).hexdigest()
+
+
+def verify_admin(request: Request) -> bool:
+    cookie_token = request.cookies.get("admin_auth", "")
+    header_pw = request.headers.get("X-Admin-Password", "")
+    return cookie_token == ADMIN_TOKEN or header_pw == ADMIN_PASSWORD
+
 
 def build_dot_tolerant_regex(term: str) -> str:
     """글자 사이에 점/기호를 넣어 우회한 단어(예: 우.리.은.행, 서.수)까지 매칭하는 정규식"""
@@ -412,3 +424,199 @@ def stats():
         "oldest_post": str(min_dt) if min_dt else None,
         "latest_post": str(max_dt) if max_dt else None
     }
+
+
+# ================= 관리자 페이지 & 학습 노트(Learning Note) API =================
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request):
+    is_authed = verify_admin(request)
+    return templates.TemplateResponse(
+        request=request,
+        name="admin.html",
+        context={"is_authed": is_authed}
+    )
+
+
+@app.post("/api/admin/login")
+async def admin_login(request: Request):
+    body = await request.json()
+    pw = (body.get("password") or "").strip()
+    if pw != ADMIN_PASSWORD:
+        return JSONResponse({"success": False, "message": "비밀번호가 일치하지 않습니다."}, status_code=401)
+    resp = JSONResponse({"success": True})
+    resp.set_cookie(
+        key="admin_auth",
+        value=ADMIN_TOKEN,
+        max_age=60 * 60 * 24 * 30,
+        httponly=True,
+        samesite="lax",
+    )
+    return resp
+
+
+@app.post("/api/admin/logout")
+def admin_logout():
+    resp = JSONResponse({"success": True})
+    resp.delete_cookie("admin_auth")
+    return resp
+
+
+@app.get("/api/admin/notes")
+def admin_get_notes(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    notes = []
+    counts = {
+        "total": 0,
+        "active": 0,
+        "protected": 0,
+        "disabled": 0,
+        "routine_word": 0,
+        "signature_phrase": 0,
+        "ritual_word": 0,
+        "manual_stop": 0,
+    }
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT note_id, pattern_type, target_text, status,
+                       hit_count, hour_spread, author_count, max_lift,
+                       reason, sample_text, is_manual, updated_at
+                FROM learning_notes
+                WHERE gallery_id = 'rescene1'
+                ORDER BY
+                    CASE status WHEN 'protected' THEN 0 WHEN 'active' THEN 1 ELSE 2 END,
+                    is_manual DESC,
+                    hit_count DESC,
+                    updated_at DESC
+            """)
+            for r in cur.fetchall():
+                p_type = r[1]
+                st = r[3]
+                counts["total"] += 1
+                if st in counts:
+                    counts[st] += 1
+                if p_type in counts and st == "active":
+                    counts[p_type] += 1
+                notes.append({
+                    "note_id": r[0],
+                    "pattern_type": p_type,
+                    "target_text": r[2],
+                    "status": st,
+                    "hit_count": r[4],
+                    "hour_spread": r[5],
+                    "author_count": r[6],
+                    "max_lift": r[7],
+                    "reason": r[8] or "",
+                    "sample_text": r[9] or "",
+                    "is_manual": bool(r[10]),
+                    "updated_at": r[11].strftime("%m/%d %H:%M") if r[11] else "",
+                })
+    return {"notes": notes, "counts": counts, "recent_topics": get_recent_topics(25)}
+
+
+@app.post("/api/admin/notes/add")
+async def admin_add_note(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    p_type = (body.get("pattern_type") or "manual_stop").strip()
+    target_text = (body.get("target_text") or "").strip()
+    reason = (body.get("reason") or "").strip()
+
+    if not target_text:
+        return JSONResponse({"success": False, "message": "단어나 문구를 입력해 주세요."}, status_code=400)
+
+    if p_type == "protected":
+        actual_type = "routine_word"
+        status = "protected"
+        default_reason = "관리자 지정 보호 단어 (화이트리스트 · 자동 학습 제외 방지)"
+    else:
+        actual_type = p_type if p_type in ("manual_stop", "signature_phrase", "routine_word", "ritual_word") else "manual_stop"
+        status = "active"
+        default_reason = "관리자 수동 등록 제외 규칙"
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO learning_notes (
+                    gallery_id, pattern_type, target_text, status,
+                    hit_count, hour_spread, author_count, max_lift,
+                    reason, sample_text, is_manual, updated_at
+                )
+                VALUES ('rescene1', %s, %s, %s, 0, 0, 0, 0.0, %s, '관리자 직접 입력', TRUE, NOW())
+                ON CONFLICT (gallery_id, pattern_type, target_text)
+                DO UPDATE SET
+                    status = EXCLUDED.status,
+                    reason = EXCLUDED.reason,
+                    is_manual = TRUE,
+                    updated_at = NOW()
+                RETURNING note_id;
+            """, (actual_type, target_text, status, reason or default_reason))
+            nid = cur.fetchone()[0]
+        conn.commit()
+    return {"success": True, "note_id": nid}
+
+
+@app.post("/api/admin/notes/status")
+async def admin_update_note_status(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    note_id = body.get("note_id")
+    new_status = (body.get("status") or "").strip()
+    if not note_id or new_status not in ("active", "protected", "disabled"):
+        return JSONResponse({"success": False, "message": "잘못된 요청입니다."}, status_code=400)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE learning_notes
+                SET status = %s,
+                    updated_at = NOW()
+                WHERE note_id = %s
+            """, (new_status, int(note_id)))
+        conn.commit()
+    return {"success": True}
+
+
+@app.post("/api/admin/notes/delete")
+async def admin_delete_note(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    note_id = body.get("note_id")
+    if not note_id:
+        return JSONResponse({"success": False, "message": "note_id가 필요합니다."}, status_code=400)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM learning_notes WHERE note_id = %s", (int(note_id),))
+        conn.commit()
+    return {"success": True}
+
+
+@app.post("/api/admin/rebuild")
+def admin_rebuild_topics(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    analyzer = TopicAnalyzer(gallery_id="rescene1")
+    rebuilt_cnt = analyzer.reset_and_regenerate_24h()
+    return {"success": True, "rebuilt_topics": rebuilt_cnt}
+
+
+@app.post("/api/admin/topic/delete")
+async def admin_delete_topic(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    event_id = body.get("event_id")
+    if not event_id:
+        return JSONResponse({"success": False, "message": "event_id가 필요합니다."}, status_code=400)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM gallery_events WHERE event_id = %s", (int(event_id),))
+        conn.commit()
+    return {"success": True}
+

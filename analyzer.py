@@ -86,9 +86,11 @@ class TopicAnalyzer:
             return 0
 
         upserted = 0
+        valid_keys = []
         with get_db() as conn:
             with conn.cursor() as cur:
                 for item in candidates:
+                    valid_keys.append((item["pattern_type"], item["target_text"]))
                     # 이미 관리자가 protected 나 disabled 로 지정한 항목은 status를 덮어쓰지 않고 통계만 갱신!
                     cur.execute("""
                         INSERT INTO learning_notes (
@@ -118,6 +120,15 @@ class TopicAnalyzer:
                         item["sample_text"],
                     ))
                     upserted += 1
+
+                # 최신 24시간 스캔에서 더 이상 조건을 충족하지 않는 오래된 자동학습(is_manual=FALSE, status='active') 잔여물 정리
+                cur.execute("""
+                    DELETE FROM learning_notes
+                    WHERE gallery_id = %s
+                      AND is_manual = FALSE
+                      AND status = 'active'
+                      AND updated_at < NOW() - INTERVAL '5 minutes';
+                """, (self.gallery_id,))
             conn.commit()
         log("학습노트", f"📒 최근 24시간 패턴 학습 완료 ({upserted}개 항목 갱신)")
         return upserted
@@ -125,7 +136,7 @@ class TopicAnalyzer:
     def save_event(self, start_dt, end_dt, cluster_id, event_info):
         """
         gallery_events 테이블에 저장:
-        - 45분 이내 인접 구간이면서 핵심어가 겹치거나, 게시글 풀(sample_post_ids)이 25% 이상 겹치는 경우 동일 토픽으로 병합!
+        - 60분 이내 인접 구간에서 동일 토픽으로 판정되는 기존 이벤트들을 모두 찾아 하나로 통합(중복 파편 카드 제거)!
         """
         kw_json = json.dumps(event_info["keywords"], ensure_ascii=False)
         core_names = [k["word"] for k in event_info["keywords"] if not k.get("is_assoc")]
@@ -140,13 +151,15 @@ class TopicAnalyzer:
                     SELECT event_id, keywords, post_count, window_start, window_end, sample_post_ids
                     FROM gallery_events
                     WHERE gallery_id = %s
-                      AND window_end >= %s - INTERVAL '45 minutes'
-                      AND window_start <= %s + INTERVAL '45 minutes'
-                    ORDER BY event_id DESC
+                      AND window_end >= %s - INTERVAL '60 minutes'
+                      AND window_start <= %s + INTERVAL '60 minutes'
+                    ORDER BY post_count DESC, event_id DESC
                 """, (self.gallery_id, start_dt, end_dt))
                 existing = cur.fetchall()
 
-                for eid, old_kws, old_cnt, old_w_start, old_w_end, old_pids in existing:
+                matched_rows = []
+                for row in existing:
+                    eid, old_kws, old_cnt, old_w_start, old_w_end, old_pids = row
                     if isinstance(old_kws, str):
                         try:
                             old_kws = json.loads(old_kws)
@@ -175,49 +188,61 @@ class TopicAnalyzer:
                             is_same_topic = True
                         elif (top_word in all_old_words) or (old_top in all_new_words):
                             is_same_topic = True
-                        elif len(set(core_names[:3]) & set(old_core[:3])) >= 1 and pid_overlap >= 0.15:
+                        elif len(set(core_names[:3]) & set(old_core[:3])) >= 2:
                             is_same_topic = True
-                        elif pid_overlap >= 0.28:
+                        elif len(set(core_names[:3]) & set(old_core[:3])) >= 1 and pid_overlap >= 0.12:
+                            is_same_topic = True
+                        elif pid_overlap >= 0.25:
                             is_same_topic = True
 
                     if is_same_topic:
-                        new_start = min(old_w_start, start_dt)
-                        new_end = max(old_w_end, end_dt)
-                        merged_pids = sorted(
-                            old_pids_set | new_pids_set,
-                            reverse=True,
-                        )[:60]
-                        new_cnt = max(old_cnt, event_info["post_count"], len(merged_pids))
+                        matched_rows.append((eid, old_cnt, old_w_start, old_w_end, old_pids_set))
 
-                        if event_info["post_count"] >= old_cnt:
-                            cur.execute("""
-                                UPDATE gallery_events
-                                SET window_start = %s,
-                                    window_end = %s,
-                                    post_count = %s,
-                                    topic_title = %s,
-                                    topic_summary = %s,
-                                    mood_tag = %s,
-                                    keywords = %s,
-                                    sample_post_ids = %s
-                                WHERE event_id = %s
-                            """, (
-                                new_start, new_end, new_cnt,
-                                event_info["title"], event_info["summary"], event_info["mood"],
-                                kw_json, merged_pids, eid
-                            ))
-                        else:
-                            cur.execute("""
-                                UPDATE gallery_events
-                                SET window_start = %s,
-                                    window_end = %s,
-                                    post_count = %s,
-                                    sample_post_ids = %s
-                                WHERE event_id = %s
-                            """, (new_start, new_end, new_cnt, merged_pids, eid))
-                        conn.commit()
-                        log("분석기", f"기존 토픽 #{eid} ('{top_word}') 병합 ({new_start.strftime('%H:%M')}~{new_end.strftime('%H:%M')}, {new_cnt}건)")
-                        return None
+                if matched_rows:
+                    primary_eid, best_old_cnt, _, _, _ = matched_rows[0]
+                    new_start = min([start_dt] + [r[2] for r in matched_rows])
+                    new_end = max([end_dt] + [r[3] for r in matched_rows])
+                    union_pids = set(new_pids_set)
+                    for r in matched_rows:
+                        union_pids |= r[4]
+                    merged_pids = sorted(union_pids, reverse=True)[:60]
+                    new_cnt = max([event_info["post_count"], len(merged_pids)] + [r[1] for r in matched_rows])
+
+                    if event_info["post_count"] >= best_old_cnt:
+                        cur.execute("""
+                            UPDATE gallery_events
+                            SET window_start = %s,
+                                window_end = %s,
+                                post_count = %s,
+                                topic_title = %s,
+                                topic_summary = %s,
+                                mood_tag = %s,
+                                keywords = %s,
+                                sample_post_ids = %s
+                            WHERE event_id = %s
+                        """, (
+                            new_start, new_end, new_cnt,
+                            event_info["title"], event_info["summary"], event_info["mood"],
+                            kw_json, merged_pids, primary_eid
+                        ))
+                    else:
+                        cur.execute("""
+                            UPDATE gallery_events
+                            SET window_start = %s,
+                                window_end = %s,
+                                post_count = %s,
+                                sample_post_ids = %s
+                            WHERE event_id = %s
+                        """, (new_start, new_end, new_cnt, merged_pids, primary_eid))
+
+                    # 만약 기존에 둘 이상으로 나뉘어 있던 중복 토픽 카드가 함께 매칭되었다면 하나로 흡수 후 정리
+                    if len(matched_rows) > 1:
+                        dup_ids = [r[0] for r in matched_rows[1:]]
+                        cur.execute("DELETE FROM gallery_events WHERE event_id = ANY(%s)", (dup_ids,))
+
+                    conn.commit()
+                    log("분석기", f"기존 토픽 #{primary_eid} ('{top_word}') 병합 ({new_start.strftime('%H:%M')}~{new_end.strftime('%H:%M')}, {new_cnt}건)")
+                    return None
 
                 cur.execute("""
                     INSERT INTO gallery_events (

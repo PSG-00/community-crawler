@@ -26,10 +26,11 @@ _HADA_SUFFIX_RE = re.compile(
     r'(하고|하네|하죠|하지|해서|하면|할까|할게|할래|하세요|했어|했다|했네|했지|해라|해요|하는|한데|한거|하노|하누|하냐|되고|되네|돼서|되면|됐어|됐다|되는)$'
 )
 
-# 명사가 아닌 일반 동사/형용사(용언) 활용형 필터링 정규식 (예: 맞으면서, 보는데, 하네, 와서, 먹는, 아는, 맛있어, 걸리면 등)
+# 명사가 아닌 일반 동사/형용사(용언) 활용형 필터링 정규식 (예: 맞으면서, 보는데, 하네, 와서, 먹는, 아는, 맛있어, 걸리면, 해줘 등)
 _PREDICATE_ENDING_RE = re.compile(
     r'(면서|는데|던데|건데|텐데|길래|잖아|네요|구나|구만|더라|던가|고싶다|고싶어|고싶네|고있어|걸리면|'
     r'하네|하고|하죠|하지|해서|하면|할까|할게|할래|하세요|했어|했다|했네|했지|해라|해요|하는|한데|'
+    r'해줘|해주네|해줘라|해달라|보여줘|알려줘|살려줘|도와줘|들어줘|봐줘|'
     r'보네|가네|오네|주네|되네|크네|많네|좋네|맞네|웃기네|귀엽네|이쁘네|예쁘네|미쳤네|지리네|'
     r'와서|가서|봐서|해서|먹는|먹고|먹어|먹자|아는|알아|보는|보고|봤어|가는|오는|쓰는|듣는|'
     r'맞으|맞아|맞는|맛있어|맛있네|맛있는|맛있던|귀여워|이뻐|예뻐|웃겨|무서워|부러워|고마워|미안해|사랑해)$'
@@ -134,8 +135,10 @@ _BRIDGE_STOPWORDS = {
 _GENERIC_SUFFIXES = {
     "사람", "생각", "느낌", "시간", "오늘", "내일", "어제", "정도", "부분", "문제", "이유", "기분",
     "사진", "영상", "노래", "무대", "추천", "이야기", "얘기", "말고", "때문", "소리", "모습", "마음",
+    "유저", "팬들", "분들", "애들", "형들", "누나", "언니", "오빠", "친구", "동생",
 }
 
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
 _URL_RE = re.compile(r'https?://\S+|www\.\S+|\S+\.(com|net|org|kr|be|me|io|ly)\S*', re.I)
 # 디시 금칙어 우회용 글자 사이 점/슬래시/쉼표 결합 (우.리.은.행 -> 우리은행, 서.수 -> 서수)
 _INTER_PUNCT_RE = re.compile(r'(?<=[가-힣0-9])[.,/·•_~\-]+(?=[가-힣])')
@@ -172,14 +175,14 @@ def detect_corpus_3char_nouns(posts) -> set:
     """
     공통 규칙 2 (말뭉치 문맥 어근 검증 법칙 — 사전 하드코딩 없이 3글자 명사 자동 판별):
     3글자 어절(ABC)의 마지막 글자(C)가 1글자 조사('은/는/이/가/도/만/로/나/야/아')와 모양이 같을 때,
-    현재 게시글 모음에서:
-      1) 2글자 어근(AB)이 단독이나 다른 조사(AB+을/를/에/도 등)와 결합해 쓰인 근거(ab_evidence)가 0~1건뿐이거나,
-      2) 3글자 단어 뒤에 또 다른 조사(ABC+이/가/을/를/도 등)가 붙은 형태가 반복 등장한다면,
-    'AB + 조사 C'가 아니라 'ABC' 자체가 온전한 3글자 고유어/명사임을 자동 판별하여 절단 금지 목록으로 반환!
+    전체 게시글 모음에서:
+      - 2글자 어근(AB)이 이미 상시어/멤버명(_BRIDGE_STOPWORDS)이거나 일반 기능어(_GENERIC)면 제외하고,
+      - 2글자 어근(AB)이 단독이나 다른 조사(AB+을/를/에/도 등)와 결합해 쓰인 근거(ab_evidence)가 0~1건뿐이면서
+        3글자 형태(ABC + ABC조사)가 3건 이상 등장할 때만 온전한 3글자 명사로 자동 보호!
     """
     raw_counts = Counter()
     for p in posts:
-        text = f"{p[1] or ''} {(p[2] or '')[:80] if p[2] and p[2] != '__EMPTY__' else ''}"
+        text = f"{p[1] or ''} {(p[2] or '')[:100] if p[2] and p[2] != '__EMPTY__' else ''}"
         text = _INTER_PUNCT_RE.sub("", text)
         text = _INTERNAL_JAMO_SPLIT_RE.sub(" ", text)
         for tok in re.findall(r'[가-힣]{2,8}', text):
@@ -193,14 +196,15 @@ def detect_corpus_3char_nouns(posts) -> set:
         if last1 not in _AMBIGUOUS_1CHAR_JOSA:
             continue
         stem2 = w3[:2]
+        # 2글자 어근이 이미 멤버명(경은, 예빈, 까엉, 미남 등)이나 범용어면 '예빈이 -> 예빈'처럼 조사를 정상 분리해야 함!
+        if stem2 in _BRIDGE_STOPWORDS or stem2 in _GENERIC:
+            continue
         abc_plus_josa = sum(raw_counts[w3 + cm] for cm in _CASE_MARKERS)
         ab_standalone = raw_counts[stem2]
         ab_other_josa = sum(raw_counts[stem2 + cm] for cm in _CASE_MARKERS if cm != last1)
         ab_evidence = ab_standalone + ab_other_josa
 
-        # 2글자 어근(AB)이 단독이나 다른 조사와 결합해 쓰인 근거(ab_evidence)가 0~1건뿐일 때만 온전한 3글자 명사로 보호
-        # (예: '진경은', '대경은'은 '진경', '대경' 근거가 0건이므로 보호 / 반면 '경은이', '예빈이'는 '경은', '예빈' 근거가 많으므로 '이' 분리!)
-        if (abc_cnt + abc_plus_josa) >= 2 and ab_evidence <= 1:
+        if (abc_cnt + abc_plus_josa) >= 3 and ab_evidence <= 1:
             protected_3char.add(w3)
 
     return protected_3char
@@ -287,27 +291,33 @@ def is_ritual_title(title):
 
 
 def strip_learned_signatures(content, learned_signatures=None):
-    """본문 앞 80자를 자르기 전에 투표 독려 꼬리말 및 학습 노트에 등재된 복붙 서명문을 먼저 제거"""
+    """
+    본문 앞 80자를 자르기 전에 HTML 태그·URL·투표 독려 꼬리말·복붙 서명문을 먼저 제거!
+    (URL이 80자 경계에서 잘려 'https'가 단어로 남거나, 긴 링크가 본문 글자 수를 잡아먹는 버그 원천 차단)
+    """
     if not content or content == "__EMPTY__":
         return ""
-    text = _BUILTIN_FOOTER_RE.sub(" ", content)
+    text = _HTML_TAG_RE.sub(" ", content)
+    text = html.unescape(text)
+    text = _BUILTIN_FOOTER_RE.sub(" ", text)
     if learned_signatures:
         for sig in learned_signatures:
             if sig and len(sig) >= 8 and sig in text:
                 text = text.replace(sig, " ")
-    return text.strip()
+    text = _URL_RE.sub(" ", text)
+    return re.sub(r'\s+', ' ', text).strip()
 
 
 def extract_words(title, content="", learned_rules=None, corpus_3char_nouns=None):
-    """게시글 1개의 [단어 노트] 생성: 복붙 꼬리말 선제거 + 점 찍힌 단어 복원 + 자모 분리 + 조사 제거"""
+    """게시글 1개의 [단어 노트] 생성: 복붙 꼬리말·URL 선제거 + 점 찍힌 단어 복원 + 자모 분리 + 조사 제거"""
     sigs = learned_rules.get("signatures") if learned_rules else None
     extra_stops = learned_rules.get("stopwords") if learned_rules else None
     protected = learned_rules.get("protected") if learned_rules else None
 
     cleaned_body = strip_learned_signatures(content, sigs)
     clean_content = cleaned_body[:80] if cleaned_body else ""
-    text = f"{title or ''} {clean_content}"
-    text = _URL_RE.sub(" ", text)
+    clean_title = _URL_RE.sub(" ", title or "")
+    text = f"{clean_title} {clean_content}"
     text = _INTER_PUNCT_RE.sub("", text)
     text = _INTERNAL_JAMO_SPLIT_RE.sub(" ", text)
     text = _CLEAN_RE.sub(" ", text)
@@ -455,8 +465,8 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
     routine_words = (learned_rules or {}).get("routine_words", set())
     protected_words = (learned_rules or {}).get("protected", set())
 
-    # 말뭉치 문맥 기반 3글자 고유 명사 자동 감지 (사전에 없는 신조어/인명도 2글자로 잘리지 않도록 자동 보호)
-    corpus_3char_nouns = detect_corpus_3char_nouns(target_posts)
+    # 말뭉치 문맥 기반 3글자 고유 명사 자동 감지 (24시간 전체 말뭉치 기준으로 판별하여 단편 구간 오판 방지)
+    corpus_3char_nouns = detect_corpus_3char_nouns(list(target_posts) + list(baseline_posts[:3000]))
 
     for p in target_posts:
         pid, title, content, created_at = p[0], p[1], p[2], p[3]
@@ -859,6 +869,7 @@ def extract_learning_candidates_from_24h(posts_24h, protected_words=None):
     hour_author_cap = defaultdict(Counter)
 
     temp_rules = {"signatures": detected_sigs, "stopwords": set(), "protected": protected}
+    corpus_3char_nouns = detect_corpus_3char_nouns(posts_24h)
 
     for p in posts_24h:
         pid, title, content, created_at = p[0], p[1], p[2], p[3]
@@ -866,7 +877,7 @@ def extract_learning_candidates_from_24h(posts_24h, protected_words=None):
         hr = created_at.hour
         ritual_flag = is_ritual_title(title)
 
-        words = extract_words(title, content, learned_rules=temp_rules)
+        words = extract_words(title, content, learned_rules=temp_rules, corpus_3char_nouns=corpus_3char_nouns)
         for w in words:
             if w in protected or w in _BRIDGE_STOPWORDS:
                 continue

@@ -363,7 +363,7 @@ def index(
             cur.execute("SELECT COUNT(*) FROM dc_posts")
             db_total_posts = cur.fetchone()[0]
 
-    recent_topics = get_recent_topics(limit=12)
+    recent_topics = get_recent_topics(limit=24)
 
     return templates.TemplateResponse(
         request=request,
@@ -389,7 +389,7 @@ def index(
     )
 
 @app.get("/api/topics")
-def api_topics(limit: int = Query(10, ge=1, le=50)):
+def api_topics(limit: int = Query(24, ge=1, le=60)):
     """실시간 떡밥 타임라인 API"""
     return {"topics": get_recent_topics(limit)}
 

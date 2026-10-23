@@ -620,3 +620,50 @@ async def admin_delete_topic(request: Request):
         conn.commit()
     return {"success": True}
 
+
+@app.get("/api/admin/top-authors")
+def admin_top_authors(request: Request, days: int = Query(0, ge=0, le=90)):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+
+    where_clause = "gallery_id = 'rescene1' AND author_code IS NOT NULL AND author_code != ''"
+    params = []
+    if days > 0:
+        where_clause += " AND created_at >= NOW() - (%s * INTERVAL '1 day')"
+        params.append(days)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT 
+                    author_code,
+                    COALESCE(MODE() WITHIN GROUP (ORDER BY nickname), 'ㅇㅇ') as main_nickname,
+                    COUNT(*) as post_count,
+                    MAX(created_at) as last_active,
+                    MIN(created_at) as first_active
+                FROM dc_posts
+                WHERE {where_clause}
+                GROUP BY author_code
+                ORDER BY post_count DESC
+                LIMIT 30;
+            """, tuple(params))
+            rows = cur.fetchall()
+
+            top_authors = []
+            max_cnt = rows[0][2] if rows else 1
+            for rank, r in enumerate(rows, 1):
+                acode = r[0]
+                is_ip = bool(re.match(r'^\d+\.\d+', acode))
+                top_authors.append({
+                    "rank": rank,
+                    "author_code": acode,
+                    "is_ip": is_ip,
+                    "nickname": r[1] or "ㅇㅇ",
+                    "post_count": r[2],
+                    "ratio": round((r[2] / max_cnt) * 100, 1),
+                    "last_active": r[3].strftime("%m/%d %H:%M") if r[3] else "",
+                    "first_active": r[4].strftime("%m/%d %H:%M") if r[4] else "",
+                })
+    return {"top_authors": top_authors, "days": days}
+
+

@@ -292,7 +292,7 @@ def get_recent_topics(limit: int = 16):
                            post_count, sample_post_ids, created_at
                     FROM gallery_events
                     WHERE post_count >= 5
-                    ORDER BY window_start DESC
+                    ORDER BY window_end DESC, window_start DESC
                     LIMIT %s
                 """, (limit,))
                 rows = cur.fetchall()

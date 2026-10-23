@@ -91,26 +91,30 @@
         </div>
 
         <!-- 2. 학습 노트 통계 요약 카드 -->
-        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-4">
+        <div class="grid grid-cols-2 sm:grid-cols-6 gap-2.5 mb-4">
             <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs">
                 <div class="text-[11px] text-slate-500 font-medium">현재 적용중 규칙</div>
                 <div class="text-lg sm:text-xl font-extrabold text-indigo-600 mt-0.5" id="statActive">-</div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs">
-                <div class="text-[11px] text-slate-500 font-medium">✂️ 복붙 꼬리말·서명</div>
+                <div class="text-[11px] text-slate-500 font-medium">✂️ 복붙 꼬리말</div>
                 <div class="text-lg sm:text-xl font-extrabold text-slate-800 mt-0.5" id="statSig">-</div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs">
-                <div class="text-[11px] text-slate-500 font-medium">🔁 24h 분산 상시어</div>
+                <div class="text-[11px] text-slate-500 font-medium">🔁 24h 상시어</div>
                 <div class="text-lg sm:text-xl font-extrabold text-slate-800 mt-0.5" id="statRoutine">-</div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs">
-                <div class="text-[11px] text-slate-500 font-medium">🚫 루틴·수동 제외어</div>
+                <div class="text-[11px] text-slate-500 font-medium">🚫 수동·루틴 제외</div>
                 <div class="text-lg sm:text-xl font-extrabold text-slate-800 mt-0.5" id="statStop">-</div>
             </div>
-            <div class="bg-emerald-50/70 rounded-xl border border-emerald-200 p-3 shadow-2xs col-span-2 sm:col-span-1">
-                <div class="text-[11px] text-emerald-800 font-semibold">🛡️ 보호 단어(예외)</div>
+            <div class="bg-emerald-50/70 rounded-xl border border-emerald-200 p-3 shadow-2xs">
+                <div class="text-[11px] text-emerald-800 font-semibold">🛡️ 보호 단어</div>
                 <div class="text-lg sm:text-xl font-extrabold text-emerald-600 mt-0.5" id="statProtected">-</div>
+            </div>
+            <div class="bg-slate-50 rounded-xl border border-slate-200 p-3 shadow-2xs">
+                <div class="text-[11px] text-slate-600 font-semibold">⏸️ 임시 해제</div>
+                <div class="text-lg sm:text-xl font-extrabold text-slate-600 mt-0.5" id="statDisabled">-</div>
             </div>
         </div>
 
@@ -165,6 +169,7 @@
                 <button type="button" onclick="setNoteFilter('ritual_word')" data-filter="ritual_word" class="note-filter-btn bg-slate-100 text-slate-600 hover:bg-slate-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">⏰ 루틴·인증어</button>
                 <button type="button" onclick="setNoteFilter('manual_stop')" data-filter="manual_stop" class="note-filter-btn bg-slate-100 text-slate-600 hover:bg-slate-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">🚫 수동 제외</button>
                 <button type="button" onclick="setNoteFilter('protected')" data-filter="protected" class="note-filter-btn bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">🛡️ 보호 단어</button>
+                <button type="button" onclick="setNoteFilter('disabled')" data-filter="disabled" class="note-filter-btn bg-slate-100 text-slate-600 border border-slate-300 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">⏸️ 임시 해제</button>
             </div>
         </div>
 
@@ -239,8 +244,13 @@
         function setNoteFilter(f) {
             currentFilter = f;
             document.querySelectorAll('.note-filter-btn').forEach(btn => {
-                if (btn.dataset.filter === f) {
+                const target = btn.dataset.filter;
+                if (target === f) {
                     btn.className = "note-filter-btn bg-slate-800 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg cursor-pointer";
+                } else if (target === 'protected') {
+                    btn.className = "note-filter-btn bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer";
+                } else if (target === 'disabled') {
+                    btn.className = "note-filter-btn bg-slate-100 text-slate-600 border border-slate-300 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer";
                 } else {
                     btn.className = "note-filter-btn bg-slate-100 text-slate-600 hover:bg-slate-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer";
                 }
@@ -255,6 +265,26 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
+        }
+
+        let toastTimeout = null;
+        function showToast(msg, iconHtml = '<i class="fa-solid fa-circle-check text-emerald-400"></i>') {
+            const toast = document.getElementById('adminToast');
+            const toastMsg = document.getElementById('toastMsg');
+            const toastIcon = document.getElementById('toastIcon');
+            if (!toast) return;
+
+            toastMsg.innerText = msg;
+            toastIcon.innerHTML = iconHtml;
+
+            toast.classList.remove('opacity-0', 'translate-y-6', 'pointer-events-none');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            if (toastTimeout) clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-6', 'pointer-events-none');
+            }, 2400);
         }
 
         async function loadAdminData() {
@@ -273,6 +303,8 @@
                 document.getElementById('statRoutine').innerText = `${c.routine_word || 0}개`;
                 document.getElementById('statStop').innerText = `${(c.ritual_word || 0) + (c.manual_stop || 0)}개`;
                 document.getElementById('statProtected').innerText = `${c.protected || 0}개`;
+                const statDisEl = document.getElementById('statDisabled');
+                if (statDisEl) statDisEl.innerText = `${c.disabled || 0}개`;
 
                 renderNotes();
                 renderTopics();
@@ -288,13 +320,17 @@
             const filtered = allNotes.filter(n => {
                 if (currentFilter === 'all') return true;
                 if (currentFilter === 'protected') return n.status === 'protected';
+                if (currentFilter === 'disabled') return n.status === 'disabled';
                 return n.pattern_type === currentFilter;
             });
 
             if (filtered.length === 0) {
+                let emptyMsg = '해당 분류의 학습 노트 항목이 없습니다.';
+                if (currentFilter === 'disabled') emptyMsg = '현재 임시 해제된 학습 규칙이 없습니다.';
+                else if (currentFilter === 'protected') emptyMsg = '현재 보호 단어로 등록된 항목이 없습니다.';
                 container.innerHTML = `
                     <div class="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center">
-                        <p class="text-sm font-bold text-slate-700">해당 분류의 학습 노트 항목이 없습니다.</p>
+                        <p class="text-sm font-bold text-slate-700">${emptyMsg}</p>
                         <p class="text-xs text-slate-500 mt-1">우측 상단 [지금 24h 패턴 학습 & 토픽 재구축] 버튼을 누르면 최근 데이터에서 자동 추출됩니다.</p>
                     </div>`;
                 return;
@@ -426,26 +462,40 @@
                 document.getElementById('addTargetText').value = '';
                 document.getElementById('addReasonText').value = '';
                 await loadAdminData();
+                showToast(`'${target_text}' 규칙을 등록했습니다.`, '<i class="fa-solid fa-plus-circle text-emerald-400"></i>');
             }
         }
 
         async function changeNoteStatus(noteId, status) {
+            const note = allNotes.find(item => item.note_id === noteId);
+            const word = note ? note.target_text : '';
             await fetch('/api/admin/notes/status', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({note_id: noteId, status})
             });
             await loadAdminData();
+
+            if (status === 'protected') {
+                showToast(`'${word}' 단어를 영구 보호(화이트리스트)로 설정했습니다.`, '<i class="fa-solid fa-shield-halved text-emerald-400"></i>');
+            } else if (status === 'disabled') {
+                showToast(`'${word}' 규칙을 임시 해제했습니다.`, '<i class="fa-solid fa-circle-pause text-amber-400"></i>');
+            } else if (status === 'active') {
+                showToast(`'${word}' 제외 규칙을 다시 적용했습니다.`, '<i class="fa-solid fa-circle-check text-indigo-400"></i>');
+            }
         }
 
         async function deleteNote(noteId) {
-            if (!confirm('이 학습 규칙을 삭제하시겠습니까?')) return;
+            const note = allNotes.find(item => item.note_id === noteId);
+            const word = note ? note.target_text : '';
+            if (!confirm(`'${word}' 학습 규칙을 삭제하시겠습니까?`)) return;
             await fetch('/api/admin/notes/delete', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({note_id: noteId})
             });
             await loadAdminData();
+            showToast(`'${word}' 규칙을 삭제했습니다.`, '<i class="fa-solid fa-trash-can text-rose-400"></i>');
         }
 
         async function quickBlockWord(word) {
@@ -460,6 +510,7 @@
                 })
             });
             await loadAdminData();
+            showToast(`'#${word}' 단어를 수동 제외어로 등록했습니다.`, '<i class="fa-solid fa-ban text-rose-400"></i>');
         }
 
         async function deleteTopicCard(eventId) {
@@ -470,6 +521,7 @@
                 body: JSON.stringify({event_id: eventId})
             });
             await loadAdminData();
+            showToast('토픽 카드를 삭제했습니다.', '<i class="fa-solid fa-trash-can text-rose-400"></i>');
         }
 
         async function triggerRebuild() {
@@ -484,9 +536,9 @@
                 const res = await fetch('/api/admin/rebuild', {method: 'POST'});
                 const data = await res.json();
                 await loadAdminData();
-                alert(`완료! 최근 24시간 데이터 패턴 학습 및 급상승 토픽 ${data.rebuilt_topics}건 재구축이 완료되었습니다.`);
+                showToast(`24h 패턴 학습 & 토픽 ${data.rebuilt_topics}건 갱신 완료!`, '<i class="fa-solid fa-wand-magic-sparkles text-amber-400"></i>');
             } catch (err) {
-                alert('재구축 중 오류가 발생했습니다.');
+                showToast('재구축 중 오류가 발생했습니다.', '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>');
             } finally {
                 btn.disabled = false;
                 icon.className = "fa-solid fa-wand-magic-sparkles";
@@ -498,5 +550,13 @@
             loadAdminData();
         });
     </script>
+
+    <!-- 검정색 토스트 알림 팝업 -->
+    <div id="adminToast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-300 transform translate-y-6 opacity-0">
+        <div class="bg-slate-900/95 text-white text-xs sm:text-sm font-semibold px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2.5 border border-slate-700/80 backdrop-blur-sm">
+            <span id="toastIcon"></span>
+            <span id="toastMsg"></span>
+        </div>
+    </div>
 </body>
 </html>

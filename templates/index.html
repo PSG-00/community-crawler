@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>리센느 갤러리 90일 아카이브 & 실시간 트렌드 타임라인</title>
+    <title>리센느 아카이브 & 실시간 트렌드 분석</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -51,7 +51,7 @@
             <div class="flex items-center space-x-2">
                 <i class="fa-solid fa-box-archive text-amber-300 text-base sm:text-lg"></i>
                 <a href="/" class="text-sm sm:text-base font-bold tracking-tight block leading-tight">
-                    리센느 90일 아카이브
+                    리센느 아카이브
                 </a>
             </div>
             <div class="flex items-center gap-1.5">
@@ -337,9 +337,10 @@
                 <div class="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 mb-2.5">
                     <i class="fa-solid fa-box-archive text-xl"></i>
                 </div>
-                <h3 class="text-base sm:text-lg font-bold text-slate-800">디시인사이드 90일 전체 아카이브</h3>
+                <h3 class="text-base sm:text-lg font-bold text-slate-800">리센느 갤러리 아카이브</h3>
                 <p class="text-xs sm:text-sm text-slate-500 mt-1.5 max-w-md mx-auto leading-relaxed break-keep">
-                    디시 본섭의 10,000건 검색 제한 없이, <strong>최근 90일 동안 올라온 모든 글</strong>을 초고속으로 검색할 수 있습니다.
+                    디시인사이드 10,000건 검색 제한 없이 모든 게시글을 초고속으로 검색할 수 있습니다.<br class="hidden sm:inline">
+                    <span class="text-slate-400 text-[11px] sm:text-xs mt-1 block">※ 서버 스토리지 비용 문제로 최근 90일간의 데이터까지 보관됩니다.</span>
                 </p>
                 <div class="mt-3.5 flex flex-wrap justify-center gap-1.5 text-[11px] text-slate-400">
                     <span class="bg-slate-100 px-2.5 py-1 rounded-full">📖 제목 터치 시 본문 즉시 열람</span>
@@ -365,7 +366,7 @@
                         </h2>
                     </div>
                     <p class="text-[11px] sm:text-xs text-slate-500 mt-0.5 break-keep">
-                        24시간 대비 급상승한 키워드와 게시글 내 동시출현 연관어를 클러스터링한 트렌드 타임라인입니다.
+                        24시간 대비 언급량이 급증한 키워드와 동시 출현 연관어를 군집화(클러스터링)한 실시간 트렌드 분석 타임라인입니다.
                     </p>
                 </div>
                 <button type="button" onclick="refreshTopics()" class="shrink-0 text-slate-600 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5">
@@ -455,7 +456,7 @@
 
     <!-- Footer -->
     <footer class="bg-white border-t border-slate-200 py-3 text-center text-xs text-slate-400">
-        리센느 마이너 갤러리 90일 무제한 아카이브 & AI 실시간 트렌드 분석
+        리센느 마이너 갤러리 아카이브 (최근 90일 보관) · 단어 군집화(클러스터링) 실시간 트렌드 분석
     </footer>
 
     <script>

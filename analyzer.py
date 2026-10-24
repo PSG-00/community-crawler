@@ -344,19 +344,19 @@ class TopicAnalyzer:
 
 
 def run_analyzer_loop():
-    """10분 간격 실시간 단어 노트 트렌드 감지 및 주기적 학습 노트 갱신 워커"""
+    """3분 간격 실시간 단어 노트 트렌드 감지 및 주기적 학습 노트 갱신 워커"""
     analyzer = TopicAnalyzer(gallery_id="rescene1")
-    log("트렌드감지기", "🚀 단어노트 & 학습노트(Learning Note) 기반 트렌드 감지 워커 시작")
+    log("트렌드감지기", "🚀 단어노트 & 학습노트(Learning Note) 기반 실시간 3분 트렌드 감지 워커 시작")
 
     analyzer.reset_and_regenerate_24h()
 
     cycle = 0
     while True:
-        time.sleep(600)  # 10분마다 실행
+        time.sleep(180)  # 3분마다 초고속 실시간 트렌드 감지
         cycle += 1
         try:
-            # 30분(3사이클)마다 최근 24시간 학습 노트 자동 업데이트
-            if cycle % 3 == 0:
+            # 30분(10사이클)마다 최근 24시간 학습 노트 자동 업데이트
+            if cycle % 10 == 0:
                 analyzer.sync_learning_notes()
             analyzer.analyze_window(end_dt=get_now_kst(), window_minutes=90)
         except Exception as e:

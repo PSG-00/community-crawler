@@ -111,20 +111,20 @@ def build_search_filter(terms: list, op: str, target: str, dot_tolerant: bool = 
         pattern = f"%{term}%"
         if target == "title":
             if dot_tolerant:
-                sub_clauses.append("(title LIKE %s OR regexp_replace(title, '[.,/·•_~-]', '', 'g') LIKE %s)")
+                sub_clauses.append("(title ILIKE %s OR regexp_replace(title, '[.,/·•_~-]', '', 'g') ILIKE %s)")
                 params.extend([pattern, pattern])
             else:
-                sub_clauses.append("title LIKE %s")
+                sub_clauses.append("title ILIKE %s")
                 params.append(pattern)
         elif target == "content":
             if dot_tolerant:
-                sub_clauses.append("(content LIKE %s OR regexp_replace(content, '[.,/·•_~-]', '', 'g') LIKE %s)")
+                sub_clauses.append("(content ILIKE %s OR regexp_replace(content, '[.,/·•_~-]', '', 'g') ILIKE %s)")
                 params.extend([pattern, pattern])
             else:
-                sub_clauses.append("content LIKE %s")
+                sub_clauses.append("content ILIKE %s")
                 params.append(pattern)
         elif target == "nickname":
-            sub_clauses.append("nickname LIKE %s")
+            sub_clauses.append("nickname ILIKE %s")
             params.append(pattern)
         elif target == "code":
             sub_clauses.append("author_code = %s")
@@ -132,13 +132,13 @@ def build_search_filter(terms: list, op: str, target: str, dot_tolerant: bool = 
         else: # all: 제목 또는 본문
             if dot_tolerant:
                 sub_clauses.append(
-                    "(title LIKE %s OR content LIKE %s "
-                    "OR regexp_replace(title, '[.,/·•_~-]', '', 'g') LIKE %s "
-                    "OR regexp_replace(content, '[.,/·•_~-]', '', 'g') LIKE %s)"
+                    "(title ILIKE %s OR content ILIKE %s "
+                    "OR regexp_replace(title, '[.,/·•_~-]', '', 'g') ILIKE %s "
+                    "OR regexp_replace(content, '[.,/·•_~-]', '', 'g') ILIKE %s)"
                 )
                 params.extend([pattern, pattern, pattern, pattern])
             else:
-                sub_clauses.append("(title LIKE %s OR content LIKE %s)")
+                sub_clauses.append("(title ILIKE %s OR content ILIKE %s)")
                 params.extend([pattern, pattern])
 
     if not sub_clauses:

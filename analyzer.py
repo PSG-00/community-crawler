@@ -174,23 +174,25 @@ class TopicAnalyzer:
                         old_core = [k["word"] if isinstance(k, dict) else str(k) for k in old_kws]
                     old_top = old_core[0] if old_core else ""
 
-                    all_new_words = {k["word"] for k in event_info["keywords"]}
-                    all_old_words = {k["word"] if isinstance(k, dict) else str(k) for k in old_kws}
+                    all_new_words = {k["word"].lower() for k in event_info["keywords"]}
+                    all_old_words = {(k["word"] if isinstance(k, dict) else str(k)).lower() for k in old_kws}
                     old_pids_set = set(old_pids or [])
                     min_pid_len = max(1, min(len(new_pids_set), len(old_pids_set)))
                     pid_overlap = len(new_pids_set & old_pids_set) / min_pid_len if (new_pids_set and old_pids_set) else 0.0
 
                     is_same_topic = False
-                    if top_word and old_top:
-                        if top_word == old_top:
+                    top_word_l = top_word.lower() if top_word else ""
+                    old_top_l = old_top.lower() if old_top else ""
+                    if top_word_l and old_top_l:
+                        if top_word_l == old_top_l:
                             is_same_topic = True
-                        elif len(top_word) >= 2 and len(old_top) >= 2 and (top_word in old_top or old_top in top_word):
+                        elif len(top_word_l) >= 2 and len(old_top_l) >= 2 and (top_word_l in old_top_l or old_top_l in top_word_l):
                             is_same_topic = True
-                        elif (top_word in all_old_words) or (old_top in all_new_words):
+                        elif (top_word_l in all_old_words) or (old_top_l in all_new_words):
                             is_same_topic = True
-                        elif len(set(core_names[:3]) & set(old_core[:3])) >= 2:
+                        elif len({w.lower() for w in core_names[:3]} & {w.lower() for w in old_core[:3]}) >= 2:
                             is_same_topic = True
-                        elif len(set(core_names[:3]) & set(old_core[:3])) >= 1 and pid_overlap >= 0.12:
+                        elif len({w.lower() for w in core_names[:3]} & {w.lower() for w in old_core[:3]}) >= 1 and pid_overlap >= 0.12:
                             is_same_topic = True
                         elif pid_overlap >= 0.25:
                             is_same_topic = True

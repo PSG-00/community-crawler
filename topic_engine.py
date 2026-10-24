@@ -214,6 +214,10 @@ def normalize_word(w, extra_stopwords=None, protected_words=None, corpus_3char_n
     w = w.strip()
     if len(w) < 2:
         return ""
+    # 영어 대소문자 구분 없이 소문자로 통일 (mvp, MVP, Mvp 등 화력 통합)
+    if re.search(r'[A-Za-z]', w):
+        w = w.lower()
+
     # 1. 어절 양끝의 ㅋㅋ/ㅎㅎ/ㅠㅠ/ㅌ 자모 선제거 (예: '예빈이김밥은ㅋㅋㅋㅋ' -> '예빈이김밥은')
     if re.search(r'[가-힣]', w):
         w = _EDGE_JAMO_RE.sub("", w)
@@ -224,7 +228,8 @@ def normalize_word(w, extra_stopwords=None, protected_words=None, corpus_3char_n
         return "진경은"
 
     # 보호 단어(화이트리스트)에 지정된 단어는 불용어 필터를 건너뛰고 즉시 통과
-    if protected_words and w in protected_words:
+    protected_lower = {p.lower() for p in protected_words} if protected_words else None
+    if protected_lower and w in protected_lower:
         return w
 
     # 2. [2글자 이상 명사] + [하다/되다 어미] (예: '취소하고' -> '취소', '공개하네' -> '공개') 명사 어근 복원
@@ -260,9 +265,10 @@ def normalize_word(w, extra_stopwords=None, protected_words=None, corpus_3char_n
     if len(w) < 2 or is_korean_predicate(w):
         return ""
 
-    if w in _GENERIC or w.lower() in _EN_STOPWORDS:
+    if w in _GENERIC or w in _EN_STOPWORDS:
         return ""
-    if extra_stopwords and w in extra_stopwords:
+    extra_stops_lower = {s.lower() for s in extra_stopwords} if extra_stopwords else None
+    if extra_stops_lower and w in extra_stops_lower:
         return ""
     if re.fullmatch(r'[0-9]+', w):
         return ""
@@ -575,8 +581,32 @@ def find_burst_candidates(target_posts, baseline_posts, baseline_hours=24, targe
     return ranked, post_map, post_notes, base_df, n_target, n_base
 
 
+def restore_canonical_casing(word: str, titles: list) -> str:
+    """영어 단어의 경우 게시글 제목들에서 가장 많이 쓰인 대소문자 형태(MVP, mvp, iPhone 등) 복원"""
+    if not word or not re.search(r'[A-Za-z]', word):
+        return word
+    pattern = re.compile(r'(?<![A-Za-z0-9])' + re.escape(word) + r'(?![A-Za-z0-9])', re.I)
+    counter = Counter()
+    for t in titles:
+        for m in pattern.finditer(t or ""):
+            counter[m.group(0)] += 1
+    if counter:
+        return counter.most_common(1)[0][0]
+    sub_pat = re.compile(re.escape(word), re.I)
+    for t in titles:
+        for m in sub_pat.finditer(t or ""):
+            counter[m.group(0)] += 1
+    if counter:
+        return counter.most_common(1)[0][0]
+    if len(word) <= 4 and re.fullmatch(r'[A-Za-z]+', word):
+        return word.upper()
+    return word
+
+
 def _build_cluster_representation(comp, union_pids, assoc_kws, post_map, post_notes):
     """클러스터의 대표 키워드(합성어 인기 변형 포함), 대표 게시글 요약, 제목 문자열 생성"""
+    titles_pool = [post_map[pid][1] for pid in union_pids if pid in post_map]
+
     # 핵심어 및 패밀리 내 주요 변형어(3건 이상 등장한 구체 합성어: 예빈이김밥, 메이김밥 등) 펼치기
     display_core = []
     seen_words = set()
@@ -590,14 +620,18 @@ def _build_cluster_representation(comp, union_pids, assoc_kws, post_map, post_no
         top_vars = [c["word"]] + compound_vars[:2]
 
         for tw in top_vars:
-            if tw not in seen_words:
-                seen_words.add(tw)
+            tw_display = restore_canonical_casing(tw, titles_pool)
+            if tw_display not in seen_words:
+                seen_words.add(tw_display)
                 v_cnt = c.get("variant_counts", {}).get(tw, c["doc_count"])
                 display_core.append({
-                    "word": tw,
+                    "word": tw_display,
                     "lift": c["lift"],
                     "count": v_cnt if len(top_vars) > 1 and tw != c["word"] else c["doc_count"],
                 })
+
+    for a in assoc_kws:
+        a["word"] = restore_canonical_casing(a["word"], titles_pool)
 
     keywords = display_core[:4] + assoc_kws[:2]
     all_variants = {v for c in comp for v in c.get("variants", ())} | {c["word"] for c in comp}

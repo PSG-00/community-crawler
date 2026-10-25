@@ -138,7 +138,7 @@ class TopicAnalyzer:
         """
         gallery_events 테이블에 저장:
         - 60분 이내 인접 구간에서 동일 토픽으로 판정되는 기존 이벤트들을 모두 찾아 하나로 통합(중복 파편 카드 제거)!
-        - 신규 떡밥 감지(INSERT) 시 활성 디스코드 웹훅으로 실시간 알림 발송!
+        - 신규 토픽 감지(INSERT) 시 활성 디스코드 웹훅으로 실시간 알림 발송!
         """
         kw_json = json.dumps(event_info["keywords"], ensure_ascii=False)
         core_names = [k["word"] for k in event_info["keywords"] if not k.get("is_assoc")]

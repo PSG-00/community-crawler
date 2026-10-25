@@ -1,5 +1,5 @@
 """
-notifier.py — 실시간 떡밥 감지 시 디스코드 웹훅(Discord Webhook)으로 알림을 전송하는 모듈
+notifier.py — 실시간 토픽 감지 시 디스코드 웹훅(Discord Webhook)으로 알림을 전송하는 모듈
 """
 import json
 import re
@@ -55,11 +55,11 @@ def send_test_webhook(webhook_url: str, channel_name: str = "") -> tuple[bool, s
 
     now_kst = datetime.now(KST)
     payload = {
-        "username": "리센느 떡밥 알리미",
+        "username": "리센느 토픽 알리미",
         "avatar_url": "https://cdn-icons-png.flaticon.com/512/3669/3669986.png",
         "embeds": [{
-            "title": "🎉 디스코드 실시간 떡밥 알림 연동 완료!",
-            "description": "앞으로 리센느 마이너 갤러리에 **새로운 화제의 떡밥**이 감지될 때마다 이 채널로 즉시 알림이 전송됩니다.",
+            "title": "🎉 디스코드 실시간 토픽 알림 연동 완료!",
+            "description": "앞으로 리센느 마이너 갤러리에 **새로운 화제의 토픽**이 감지될 때마다 이 채널로 즉시 알림이 전송됩니다.",
             "color": 5793266,  # #5865F2 Discord Blurple
             "fields": [
                 {
@@ -93,7 +93,7 @@ def send_test_webhook(webhook_url: str, channel_name: str = "") -> tuple[bool, s
 
 def send_new_topic_notification(event_info: dict, start_dt, end_dt, gallery_id: str = "rescene1"):
     """
-    새로운 떡밥이 감지(생성)되었을 때 등록된 모든 활성 디스코드 웹훅 채널로 알림 전송
+    새로운 토픽이 감지(생성)되었을 때 등록된 모든 활성 디스코드 웹훅 채널로 알림 전송
     """
     try:
         with get_db() as conn:
@@ -133,11 +133,11 @@ def send_new_topic_notification(event_info: dict, start_dt, end_dt, gallery_id: 
         archive_link = f"{SITE_BASE_URL}/?q={encoded_query}&target=all" if search_query else SITE_BASE_URL
 
         embed_payload = {
-            "username": "리센느 떡밥 알리미",
+            "username": "리센느 토픽 알리미",
             "avatar_url": "https://cdn-icons-png.flaticon.com/512/3669/3669986.png",
             "embeds": [{
                 "title": f"🔥 {title}",
-                "description": f"```text\n{summary}\n```" if summary else "새로운 떡밥이 갤러리에서 활발히 논의되고 있습니다.",
+                "description": f"```text\n{summary}\n```" if summary else "새로운 토픽이 갤러리에서 활발히 논의되고 있습니다.",
                 "color": 16103179,  # #F59E0B Amber
                 "fields": [
                     {

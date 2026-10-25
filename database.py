@@ -53,7 +53,7 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_posts_created_at ON dc_posts (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_gallery ON dc_posts (gallery_id);
 
-    -- 실시간 갤러리 떡밥 & 토픽 타임라인 테이블
+    -- 실시간 갤러리 토픽 타임라인 테이블
     CREATE TABLE IF NOT EXISTS gallery_events (
         event_id SERIAL PRIMARY KEY,
         gallery_id VARCHAR(50) NOT NULL,
@@ -74,7 +74,7 @@ def init_db():
     -- 기준 미달(8건 미만) 소규모 잡담 이벤트 정리
     DELETE FROM gallery_events WHERE post_count < 8;
 
-    -- 실시간 떡밥 분석기 자동/수동 학습 노트 테이블
+    -- 실시간 토픽 분석기 자동/수동 학습 노트 테이블
     CREATE TABLE IF NOT EXISTS learning_notes (
         note_id SERIAL PRIMARY KEY,
         gallery_id VARCHAR(50) NOT NULL DEFAULT 'rescene1',
@@ -94,7 +94,7 @@ def init_db():
     );
     CREATE INDEX IF NOT EXISTS idx_learning_notes_gallery_status ON learning_notes (gallery_id, status);
 
-    -- 디스코드 실시간 떡밥 알림 웹훅 테이블
+    -- 디스코드 실시간 토픽 알림 웹훅 테이블
     CREATE TABLE IF NOT EXISTS discord_webhooks (
         webhook_id SERIAL PRIMARY KEY,
         gallery_id VARCHAR(50) NOT NULL DEFAULT 'rescene1',

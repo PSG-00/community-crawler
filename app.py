@@ -283,7 +283,7 @@ def execute_search(
 KST = timezone(timedelta(hours=9))
 
 def get_recent_topics(limit: int = 16):
-    """실시간 떡밥 타임라인 이벤트 조회"""
+    """실시간 토픽 타임라인 이벤트 조회"""
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -318,7 +318,7 @@ def get_recent_topics(limit: int = 16):
             # 주요 키워드 리스트
             keyword_list = [k["word"] if isinstance(k, dict) else str(k) for k in kws]
 
-            # 떡밥 시간대 검색용 시작/종료 시각 (앞뒤 5분 여유 포함, datetime-local 포맷)
+            # 토픽 시간대 검색용 시작/종료 시각 (앞뒤 5분 여유 포함, datetime-local 포맷)
             search_start = (w_start - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M")
             search_end = (w_end + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M")
 
@@ -391,7 +391,7 @@ def index(
 
 @app.get("/api/topics")
 def api_topics(limit: int = Query(24, ge=1, le=60)):
-    """실시간 떡밥 타임라인 API"""
+    """실시간 토픽 타임라인 API"""
     return {"topics": get_recent_topics(limit)}
 
 @app.get("/api/search")

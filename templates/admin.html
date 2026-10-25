@@ -18,26 +18,28 @@
 
     <!-- 상단 헤더 -->
     <header class="bg-slate-900 text-white shadow-md sticky top-0 z-30">
-        <div class="max-w-5xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between">
-            <div class="flex items-center gap-2.5">
-                <span class="bg-indigo-600 text-white p-2 rounded-xl shadow-xs">
-                    <i class="fa-solid fa-book-bookmark text-sm"></i>
+        <div class="max-w-5xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+                <span class="bg-indigo-600 text-white p-1.5 sm:p-2 rounded-xl shadow-xs shrink-0">
+                    <i class="fa-solid fa-book-bookmark text-xs sm:text-sm"></i>
                 </span>
-                <div>
-                    <h1 class="text-sm sm:text-base font-extrabold tracking-tight flex items-center gap-2">
-                        <span>갤러리 패턴 학습 노트 (Learning Note)</span>
-                        <span class="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] px-2 py-0.5 rounded-full font-bold">ADMIN</span>
+                <div class="min-w-0">
+                    <h1 class="text-xs sm:text-base font-extrabold tracking-tight flex items-center gap-1.5 truncate">
+                        <span>패턴 학습 노트</span>
+                        <span class="hidden sm:inline">(Learning Note)</span>
+                        <span class="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full font-bold shrink-0">ADMIN</span>
                     </h1>
-                    <p class="text-[11px] text-slate-400">24시간 주기 반복 데이터 자동 학습 · 보호 단어(화이트리스트) · 토픽 제어</p>
+                    <p class="text-[10px] sm:text-[11px] text-slate-400 truncate hidden sm:block">24시간 주기 반복 데이터 자동 학습 · 보호 단어(화이트리스트) · 토픽 제어</p>
                 </div>
             </div>
-            <div class="flex items-center gap-2">
-                <a href="/#topics" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5 shrink-0">
+                <a href="/#topics" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5 whitespace-nowrap">
                     <i class="fa-solid fa-arrow-left text-[10px]"></i>
-                    <span>검색/트렌드로 돌아가기</span>
+                    <span class="hidden sm:inline">검색/트렌드로 돌아가기</span>
+                    <span class="sm:hidden">돌아가기</span>
                 </a>
                 {% if is_authed %}
-                <button type="button" onclick="logoutAdmin()" class="bg-rose-950/80 hover:bg-rose-900 text-rose-300 text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-rose-800/60 transition">
+                <button type="button" onclick="logoutAdmin()" class="bg-rose-950/80 hover:bg-rose-900 text-rose-300 text-xs font-semibold px-2 sm:px-2.5 py-1.5 rounded-xl border border-rose-800/60 transition whitespace-nowrap">
                     로그아웃
                 </button>
                 {% endif %}
@@ -76,15 +78,15 @@
                     <span class="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[11px] font-bold px-2 py-0.5 rounded-md">
                         <i class="fa-solid fa-shield-halved mr-1"></i>자동 오작동 안전장치 작동 중
                     </span>
-                    <span class="text-xs text-indigo-200 font-medium">데이터 학습이 꼬여도 떡밥이 망가지지 않도록 2중 보호됩니다.</span>
+                    <span class="text-xs text-indigo-200 font-medium">데이터 학습이 꼬여도 토픽이 망가지지 않도록 2중 보호됩니다.</span>
                 </div>
                 <p class="text-xs text-slate-300 leading-relaxed break-keep">
-                    ① <b>6.5배 화력 돌파 규칙</b>: 일상 상시어로 학습된 단어라도 진짜 큰 떡밥이 터져 평소 대비 6.5배 이상 급증하면 차단을 뚫고 자동 노출됩니다.<br>
+                    ① <b>6.5배 화력 돌파 규칙</b>: 일상 상시어로 학습된 단어라도 진짜 큰 토픽이 터져 평소 대비 6.5배 이상 급증하면 차단을 뚫고 자동 노출됩니다.<br>
                     ② <b>🛡️ 보호 단어(화이트리스트)</b>: 만약 자동 학습이 제외하면 안 되는 단어를 잡았다면 <b>[🛡️ 보호]</b> 버튼만 누르세요. 영구히 제외 대상에서 보호됩니다.
                 </p>
             </div>
             <button type="button" id="rebuildBtn" onclick="triggerRebuild()"
-                    class="shrink-0 w-full sm:w-auto bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs sm:text-sm px-4 py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer">
+                    class="shrink-0 w-full sm:w-auto bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs sm:text-sm px-4 py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
                 <i id="rebuildIcon" class="fa-solid fa-wand-magic-sparkles"></i>
                 <span id="rebuildBtnText">지금 24h 패턴 학습 & 토픽 재구축</span>
             </button>
@@ -149,30 +151,29 @@
         </div>
 
         <!-- 4. 메인 탭 전환 (학습 노트 목록 vs 현재 감지된 토픽 관리 vs 식별코드 작성 랭킹) -->
-        <div class="flex items-center justify-between border-b border-slate-200 mb-4 gap-2 flex-wrap">
-            <div class="flex gap-1 flex-wrap">
+        <div class="flex items-center justify-between border-b border-slate-200 mb-4 gap-2">
+            <div class="flex gap-1 overflow-x-auto no-scrollbar max-w-full pb-0.5">
                 <button type="button" id="adminTabNotes" onclick="switchAdminTab('notes')"
-                        class="px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 cursor-pointer flex items-center gap-1.5">
+                        class="px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0">
                     <i class="fa-solid fa-book"></i>
                     <span>📒 학습 노트 규칙</span>
                 </button>
                 <button type="button" id="adminTabTopics" onclick="switchAdminTab('topics')"
-                        class="px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5">
+                        class="px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0">
                     <i class="fa-solid fa-fire text-amber-500"></i>
-                    <span>실시간 감지 토픽</span>
+                    <span>🔥 실시간 토픽 관리</span>
                 </button>
                 <button type="button" id="adminTabAuthors" onclick="switchAdminTab('authors')"
-                        class="px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5">
+                        class="px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0">
                     <i class="fa-solid fa-trophy text-amber-500"></i>
                     <span>🏆 식별코드 순위 (TOP 30)</span>
                 </button>
                 <button type="button" id="adminTabWebhooks" onclick="switchAdminTab('webhooks')"
-                        class="px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5">
+                        class="px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0">
                     <i class="fa-brands fa-discord text-[#5865F2]"></i>
                     <span>📢 디코 웹훅 연동</span>
                 </button>
             </div>
-
             <!-- 카테고리 필터 칩 -->
             <div id="noteFilterBar" class="flex flex-wrap gap-1 py-1">
                 <button type="button" onclick="setNoteFilter('all')" data-filter="all" class="note-filter-btn bg-slate-800 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg cursor-pointer">전체</button>
@@ -208,15 +209,15 @@
                 </div>
                 <div class="flex items-center gap-1 self-stretch sm:self-auto justify-end">
                     <button type="button" onclick="setAuthorDays(0)" id="authorDays0"
-                            class="author-days-btn px-2.5 py-1 text-xs rounded-lg font-bold bg-slate-800 text-white cursor-pointer transition">
+                            class="author-days-btn px-2.5 py-1 text-xs rounded-lg font-bold bg-slate-800 text-white cursor-pointer transition whitespace-nowrap">
                         전체(90일)
                     </button>
                     <button type="button" onclick="setAuthorDays(7)" id="authorDays7"
-                            class="author-days-btn px-2.5 py-1 text-xs rounded-lg font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer transition">
+                            class="author-days-btn px-2.5 py-1 text-xs rounded-lg font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer transition whitespace-nowrap">
                         최근 7일
                     </button>
                     <button type="button" onclick="setAuthorDays(1)" id="authorDays1"
-                            class="author-days-btn px-2.5 py-1 text-xs rounded-lg font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer transition">
+                            class="author-days-btn px-2.5 py-1 text-xs rounded-lg font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer transition whitespace-nowrap">
                         최근 24시간
                     </button>
                     <button type="button" onclick="loadTopAuthors(currentAuthorDays)" title="새로고침"
@@ -242,7 +243,7 @@
                     </div>
                     <div>
                         <h3 class="text-sm sm:text-base font-bold text-slate-900">새 디스코드 채널 웹훅 등록</h3>
-                        <p class="text-xs text-slate-500">새로운 떡밥이 감지될 때마다 디코 채널로 실시간 알림 임베드를 전송합니다.</p>
+                        <p class="text-xs text-slate-500">새로운 토픽이 감지될 때마다 디코 채널로 실시간 알림 임베드를 전송합니다.</p>
                     </div>
                 </div>
                 <form onsubmit="addAdminWebhook(event)" class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
@@ -339,8 +340,8 @@
             if (secWebhooks) secWebhooks.classList.add('hidden');
             if (filterBar) filterBar.classList.add('hidden');
 
-            const activeClass = "px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 cursor-pointer flex items-center gap-1.5";
-            const inactiveClass = "px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5";
+            const activeClass = "px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0";
+            const inactiveClass = "px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0";
 
             if (tabNotes) tabNotes.className = inactiveClass;
             if (tabTopics) tabTopics.className = inactiveClass;
@@ -443,8 +444,8 @@
                             <div class="text-sm sm:text-base font-black text-indigo-600 font-mono">${a.post_count.toLocaleString()}건</div>
                             <div class="text-[10px] text-slate-400 sm:hidden">${escapeHtml(a.last_active)}</div>
                         </div>
-                        <a href="/?q=${encodeURIComponent(a.author_code)}&target=author_code" target="_blank"
-                           class="bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-700 border border-slate-200 text-xs font-semibold px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer">
+                        <a href="/?q=${encodeURIComponent(a.author_code)}&target=code" target="_blank"
+                           class="bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-700 border border-slate-200 text-xs font-semibold px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer whitespace-nowrap">
                             <span>글 모아보기</span>
                             <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
                         </a>

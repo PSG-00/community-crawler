@@ -50,11 +50,11 @@
         <div class="max-w-4xl mx-auto px-3.5 py-2.5 flex justify-between items-center border-b border-indigo-600/60">
             <div class="flex items-center space-x-2">
                 <i class="fa-solid fa-box-archive text-amber-300 text-base sm:text-lg"></i>
-                <a href="/" class="text-sm sm:text-base font-bold tracking-tight block leading-tight">
+                <a href="/" class="text-sm sm:text-base font-bold tracking-tight block leading-tight whitespace-nowrap">
                     리센느 아카이브
                 </a>
             </div>
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5 shrink-0">
                 <div class="text-[11px] text-indigo-100 flex items-center gap-1.5 bg-indigo-800/90 px-2 py-1 rounded-lg border border-indigo-500/40 font-medium">
                     <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                     <span>보관 <strong class="text-white font-mono">{{ "{:,}".format(db_total_posts) }}</strong>건</span>
@@ -71,14 +71,14 @@
             <div class="grid grid-cols-2 p-1 bg-indigo-900/60 backdrop-blur-xs rounded-xl border border-indigo-600/50 text-xs sm:text-sm font-semibold">
                 <!-- 탭 1: 아카이브 검색 (50%) -->
                 <button type="button" id="tabBtnSearch" onclick="switchMainTab('search')"
-                        class="w-full py-2 sm:py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 {% if active_tab != 'topics' %}bg-white text-indigo-700 shadow-sm font-bold{% else %}text-indigo-200 hover:text-white font-medium{% endif %}">
+                        class="w-full py-2 sm:py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap {% if active_tab != 'topics' %}bg-white text-indigo-700 shadow-sm font-bold{% else %}text-indigo-200 hover:text-white font-medium{% endif %}">
                     <i class="fa-solid fa-magnifying-glass text-xs"></i>
                     <span>게시글 검색</span>
                 </button>
 
                 <!-- 탭 2: 실시간 트렌드 (50%) -->
                 <button type="button" id="tabBtnTopics" onclick="switchMainTab('topics')"
-                        class="w-full py-2 sm:py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 {% if active_tab == 'topics' %}bg-white text-indigo-700 shadow-sm font-bold{% else %}text-indigo-200 hover:text-white font-medium{% endif %}">
+                        class="w-full py-2 sm:py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap {% if active_tab == 'topics' %}bg-white text-indigo-700 shadow-sm font-bold{% else %}text-indigo-200 hover:text-white font-medium{% endif %}">
                     <span class="relative flex h-2 w-2">
                         <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
                         <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
@@ -297,7 +297,7 @@
                             </a>
                             {% endif %}
                         </div>
-                        <div class="flex items-center shrink-0 gap-2 sm:gap-3 text-[11px] sm:text-xs">
+                        <div class="flex items-center shrink-0 gap-2 sm:gap-3 text-[11px] sm:text-xs whitespace-nowrap">
                             <button type="button" onclick="togglePostContent('{{ item.post_id }}')" id="toggleBtn-{{ item.post_id }}" class="text-indigo-600 font-semibold hover:underline">
                                 본문 보기 ▼
                             </button>
@@ -353,31 +353,26 @@
 
         <!-- ======================= 2. 실시간 트렌드 타임라인 화면 (TAB 2) ======================= -->
         <div id="viewTopics" class="{% if active_tab != 'topics' %}hidden{% endif %} space-y-3">
-            <!-- 타임라인 헤더 -->
-            <div class="bg-white rounded-2xl border border-amber-200 p-3.5 sm:p-4 shadow-xs flex items-center justify-between">
-                <div>
-                    <div class="flex items-center gap-1.5">
-                        <span class="flex h-2.5 w-2.5 relative">
-                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
-                        </span>
-                        <h2 class="text-sm sm:text-base font-bold text-slate-900">
-                            실시간 급상승 토픽 타임라인
-                        </h2>
-                    </div>
-                    <p class="text-[11px] sm:text-xs text-slate-500 mt-0.5 break-keep">
-                        24시간 대비 언급량이 급증한 키워드와 동시 출현 연관어를 군집화(클러스터링)한 실시간 트렌드 분석 타임라인입니다.
-                    </p>
+            <!-- 실시간 급상승 토픽 헤더 -->
+            <div class="bg-white rounded-2xl border border-amber-200/90 p-3 sm:p-3.5 shadow-2xs flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="flex h-2.5 w-2.5 relative shrink-0">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                    </span>
+                    <h2 class="text-sm sm:text-base font-bold text-slate-900 tracking-tight whitespace-nowrap">
+                        실시간 급상승 토픽
+                    </h2>
                 </div>
-                <div class="flex items-center gap-1.5 shrink-0">
+                <div class="flex flex-col gap-1.5 shrink-0">
                     <button type="button" onclick="openDiscordModal()"
-                            class="text-[#5865F2] hover:bg-[#5865F2]/10 bg-indigo-50/70 border border-[#5865F2]/30 px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs">
-                        <i class="fa-brands fa-discord text-sm"></i>
-                        <span class="hidden sm:inline">디스코드 알림 받기</span>
-                        <span class="sm:hidden">디코 알림</span>
+                            class="text-[#5865F2] hover:bg-[#5865F2]/10 bg-indigo-50/70 border border-[#5865F2]/30 px-2.5 py-1 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap">
+                        <i class="fa-brands fa-discord text-xs sm:text-sm"></i>
+                        <span>디스코드 알림</span>
                     </button>
-                    <button type="button" onclick="refreshTopics()" class="shrink-0 text-slate-600 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer">
-                        <i id="topicRefreshIcon" class="fa-solid fa-rotate-right text-xs"></i>
+                    <button type="button" onclick="refreshTopics()"
+                            class="text-slate-600 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 border border-slate-200 px-2.5 py-1 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap">
+                        <i id="topicRefreshIcon" class="fa-solid fa-rotate-right text-[10px] sm:text-xs"></i>
                         <span>새로고침</span>
                     </button>
                 </div>
@@ -391,10 +386,10 @@
                     <div>
                         <!-- 시간대 & 글 화력 -->
                         <div class="flex items-center justify-between gap-2 text-xs mb-2">
-                            <span class="font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/70 text-[11px] sm:text-xs">
+                            <span class="font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/70 text-[11px] sm:text-xs whitespace-nowrap">
                                 <i class="fa-regular fa-clock mr-1"></i>{{ topic.time_display }}
                             </span>
-                            <span class="text-[11px] text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200/50">
+                            <span class="text-[11px] text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200/50 whitespace-nowrap">
                                 🔥 관련 글 {{ topic.post_count }}건
                             </span>
                         </div>
@@ -425,7 +420,7 @@
                         <div class="flex flex-wrap gap-1.5 mb-2.5">
                             {% for kw in topic.keywords %}
                             <button type="button" onclick="quickSearchTopic('{{ kw.word if kw.word is defined else kw }}', '{{ topic.search_start }}', '{{ topic.search_end }}')"
-                                    class="bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-900 border border-amber-200/80 text-xs px-2.5 py-1 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs">
+                                    class="bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-900 border border-amber-200/80 text-xs px-2.5 py-1 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs whitespace-nowrap">
                                 <span>#{{ kw.word if kw.word is defined else kw }}</span>
                                 {% if kw.lift is defined %}
                                 <span class="text-[9px] text-amber-700 font-mono opacity-80">{{ kw.lift }}x</span>
@@ -437,7 +432,7 @@
                         <!-- 토픽 관련 글 모아보기 버튼 (핵심 키워드 다중 통합 + 해당 시간대 자동 지정 검색) -->
                         {% set topic_search_phrase = topic.keyword_list[:4] | join(' OR ') if topic.keyword_list else '' %}
                         <button type="button" onclick="quickSearchTopic('{{ topic_search_phrase | replace("'", "\\'") }}', '{{ topic.search_start }}', '{{ topic.search_end }}')"
-                                class="w-full bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 text-xs sm:text-sm font-semibold py-2 rounded-xl transition flex items-center justify-center gap-1.5 border border-indigo-200 active:scale-[0.99]"
+                                class="w-full bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 text-xs sm:text-sm font-semibold py-2 rounded-xl transition flex items-center justify-center gap-1.5 border border-indigo-200 active:scale-[0.99] whitespace-nowrap"
                                 title="'{{ topic_search_phrase }}' ({{ topic.time_display }}) 관련 글 전체 모아보기">
                             <i class="fa-solid fa-magnifying-glass text-xs"></i>
                             <span>이 시간대 관련 글 모아보기</span>
@@ -505,7 +500,7 @@
             }
         });
 
-        // 떡밥 키워드 터치 시 검색 탭으로 즉시 전환 후 해당 떡밥 시간대(startDt ~ endDt)로 검색 실행
+        // 토픽 키워드 터치 시 검색 탭으로 즉시 전환 후 해당 떡밥 시간대(startDt ~ endDt)로 검색 실행
         function quickSearchTopic(keyword, startDt, endDt) {
             if (!keyword) return;
             switchMainTab('search');
@@ -531,7 +526,7 @@
             }
         }
 
-        // 실시간 떡밥 새로고침
+        // 실시간 토픽 새로고침
         async function refreshTopics() {
             const icon = document.getElementById('topicRefreshIcon');
             if (icon) icon.classList.add('fa-spin');
@@ -540,7 +535,7 @@
                 const data = await resp.json();
                 window.location.reload();
             } catch (err) {
-                console.error("떡밥 새로고침 실패:", err);
+                console.error("토픽 새로고침 실패:", err);
             } finally {
                 if (icon) icon.classList.remove('fa-spin');
             }
@@ -623,7 +618,7 @@
                         <span class="font-medium text-slate-700 truncate text-[11px] sm:text-xs">${item.nickname}</span>
                         ${item.author_code ? `<a href="/?q=${encodeURIComponent(item.author_code)}&target=code" class="shrink-0 bg-slate-100 hover:bg-slate-200 text-slate-600 px-1 py-0.5 rounded font-mono text-[10px] sm:text-xs transition">(${item.author_code})</a>` : ''}
                     </div>
-                    <div class="flex items-center shrink-0 gap-2 sm:gap-3 text-[11px] sm:text-xs">
+                    <div class="flex items-center shrink-0 gap-2 sm:gap-3 text-[11px] sm:text-xs whitespace-nowrap">
                         <button type="button" onclick="togglePostContent('${item.post_id}')" id="toggleBtn-${item.post_id}" class="text-indigo-600 font-semibold hover:underline">
                             본문 보기 ▼
                         </button>
@@ -836,8 +831,8 @@
                         <i class="fa-brands fa-discord"></i>
                     </div>
                     <div>
-                        <h3 class="font-extrabold text-base leading-tight">디스코드 떡밥 알림 설정</h3>
-                        <p class="text-xs text-indigo-100 mt-0.5">새로운 떡밥 감지 시 디코 채널로 즉시 발송</p>
+                        <h3 class="font-extrabold text-base leading-tight">디스코드 토픽 알림 설정</h3>
+                        <p class="text-xs text-indigo-100 mt-0.5">새로운 토픽 감지 시 디코 채널로 즉시 발송</p>
                     </div>
                 </div>
                 <button type="button" onclick="closeDiscordModal()" class="text-white/80 hover:text-white p-1 text-lg cursor-pointer">
@@ -848,12 +843,12 @@
             <!-- Modal Tab Selector (등록 vs 해제) -->
             <div class="flex border-b border-slate-200 bg-slate-50 text-xs font-bold text-slate-500">
                 <button type="button" id="discordTabSubscribe" onclick="switchDiscordTab('sub')"
-                        class="flex-1 py-3 border-b-2 border-[#5865F2] text-[#5865F2] transition flex items-center justify-center gap-1.5 cursor-pointer">
+                        class="flex-1 py-2.5 sm:py-3 border-b-2 border-[#5865F2] text-[#5865F2] transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap text-xs font-bold">
                     <i class="fa-solid fa-bell"></i>
                     <span>알림 등록</span>
                 </button>
                 <button type="button" id="discordTabUnsubscribe" onclick="switchDiscordTab('unsub')"
-                        class="flex-1 py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition flex items-center justify-center gap-1.5 cursor-pointer">
+                        class="flex-1 py-2.5 sm:py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap text-xs font-bold">
                     <i class="fa-solid fa-bell-slash"></i>
                     <span>알림 해제 (삭제)</span>
                 </button>
@@ -879,7 +874,7 @@
                             채널 / 서버 이름 <span class="text-slate-400 font-normal">(선택)</span>
                         </label>
                         <input type="text" id="discordChannelName"
-                               placeholder="예: 리센느 떡밥 알림방"
+                               placeholder="예: 리센느 토픽 알림방"
                                class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs sm:text-sm focus:outline-none focus:border-[#5865F2]">
                     </div>
 

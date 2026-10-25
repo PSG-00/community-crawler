@@ -279,7 +279,7 @@ if __name__ == "__main__":
     t_content = threading.Thread(target=content_fill_worker, daemon=True)
     t_content.start()
 
-    # 3. 실시간 떡밥 타임라인 감지 및 AI 요약 워커 시작
+    # 3. 실시간 토픽 타임라인 감지 및 AI 요약 워커 시작
     t_analyzer = threading.Thread(target=run_analyzer_loop, daemon=True)
     t_analyzer.start()
 

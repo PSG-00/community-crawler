@@ -220,16 +220,26 @@ def content_fill_worker():
 
 # ================= 3. 실시간 모니터링 루프 (최신 글 즉시 수집) =================
 def realtime_worker():
-    log("실시간", "👀 실시간 1분 모니터링 가동 (새 글 즉시 반영)")
+    log("실시간", "👀 실시간 15초 모니터링 가동 (새 글 즉시 반영)")
     last_cleanup = None
+    consecutive_empty = 0
 
     while True:
         try:
-            # 1~2페이지 확인
-            recent_posts = []
-            for p in range(1, 3):
-                recent_posts.extend(parse_list_page(GALLERY_ID, page=p))
-                time.sleep(0.1)
+            # 최신 1페이지 확인 (15초 주기는 1페이지만으로 충분하며 디시 요청 부하 50% 절감)
+            recent_posts = parse_list_page(GALLERY_ID, page=1)
+
+            if not recent_posts:
+                consecutive_empty += 1
+                if consecutive_empty >= 3:
+                    log("실시간", "⚠️ 디시인사이드 응답 지연/차단 징후 감지: 45초 쿨다운 대기")
+                    time.sleep(45)
+                    consecutive_empty = 0
+                    continue
+                time.sleep(5)
+                continue
+
+            consecutive_empty = 0
 
             # 신규 글만 필터링
             post_ids = [p[0] for p in recent_posts]
@@ -265,8 +275,9 @@ def realtime_worker():
 
         except Exception as e:
             log("실시간", f"에러: {e}")
+            time.sleep(5)
 
-        time.sleep(60)
+        time.sleep(15)
 
 if __name__ == "__main__":
     init_db()

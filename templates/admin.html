@@ -85,11 +85,18 @@
                     ② <b>🛡️ 보호 단어(화이트리스트)</b>: 만약 자동 학습이 제외하면 안 되는 단어를 잡았다면 <b>[🛡️ 보호]</b> 버튼만 누르세요. 영구히 제외 대상에서 보호됩니다.
                 </p>
             </div>
-            <button type="button" id="rebuildBtn" onclick="triggerRebuild()"
-                    class="shrink-0 w-full sm:w-auto bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs sm:text-sm px-4 py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
-                <i id="rebuildIcon" class="fa-solid fa-wand-magic-sparkles"></i>
-                <span id="rebuildBtnText">지금 24h 패턴 학습 & 토픽 재구축</span>
-            </button>
+            <div class="flex flex-col sm:flex-row gap-2 shrink-0 w-full sm:w-auto">
+                <button type="button" id="reconcileBtn" onclick="triggerReconcile()"
+                        class="bg-indigo-900/90 hover:bg-indigo-800 text-indigo-100 font-bold text-xs sm:text-sm px-3.5 py-3 rounded-xl border border-indigo-500/50 transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shadow-sm">
+                    <i id="reconcileIcon" class="fa-solid fa-magnifying-glass-arrow-right text-indigo-300"></i>
+                    <span id="reconcileBtnText">누락 글 전수 감사</span>
+                </button>
+                <button type="button" id="rebuildBtn" onclick="triggerRebuild()"
+                        class="bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs sm:text-sm px-4 py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
+                    <i id="rebuildIcon" class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span id="rebuildBtnText">지금 24h 패턴 학습 & 토픽 재구축</span>
+                </button>
+            </div>
         </div>
 
         <!-- 2. 학습 노트 통계 요약 카드 -->
@@ -735,6 +742,31 @@
             });
             await loadAdminData();
             showToast('토픽 카드를 삭제했습니다.', '<i class="fa-solid fa-trash-can text-rose-400"></i>');
+        }
+
+        async function triggerReconcile() {
+            const btn = document.getElementById('reconcileBtn');
+            const icon = document.getElementById('reconcileIcon');
+            const txt = document.getElementById('reconcileBtnText');
+            btn.disabled = true;
+            icon.className = "fa-solid fa-spinner fa-spin text-indigo-300";
+            txt.innerText = "최근 3,000건 감사 중...";
+
+            try {
+                const res = await fetch('/api/admin/reconcile?pages=30', {method: 'POST'});
+                const data = await res.json();
+                if (data.missing_count === 0) {
+                    showToast(`최근 ${data.scanned_count.toLocaleString()}건 전수 검사 완료: 누락 글 0건 (무결성 100%)!`, '<i class="fa-solid fa-circle-check text-emerald-400"></i>');
+                } else {
+                    showToast(`누락 글 ${data.missing_count}건 발견 및 즉시 보충 완료!`, '<i class="fa-solid fa-download text-amber-400"></i>');
+                }
+            } catch (err) {
+                showToast('감사 중 오류가 발생했습니다.', '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>');
+            } finally {
+                btn.disabled = false;
+                icon.className = "fa-solid fa-magnifying-glass-arrow-right text-indigo-300";
+                txt.innerText = "누락 글 전수 감사";
+            }
         }
 
         async function triggerRebuild() {

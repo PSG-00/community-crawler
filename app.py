@@ -607,6 +607,15 @@ def admin_rebuild_topics(request: Request):
     return {"success": True, "rebuilt_topics": rebuilt_cnt}
 
 
+@app.post("/api/admin/reconcile")
+def admin_reconcile_posts(request: Request, pages: int = Query(30, ge=5, le=100)):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    from crawler import reconcile_recent_posts
+    res = reconcile_recent_posts(max_pages=pages)
+    return {"success": True, **res}
+
+
 @app.post("/api/admin/topic/delete")
 async def admin_delete_topic(request: Request):
     if not verify_admin(request):

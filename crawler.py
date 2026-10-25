@@ -316,6 +316,47 @@ def realtime_worker():
 
         time.sleep(15)
 
+# ================= 4. 누락 글 전수 감사 및 보충 함수 =================
+def reconcile_recent_posts(gallery_id=GALLERY_ID, max_pages=50):
+    """
+    최근 N페이지(최대 5,000건)를 훑으며 우리 DB에 없는 살아있는 글이 있는지 전수 대조 후 즉시 보충
+    """
+    log("누락감사", f"🔍 최근 {max_pages}페이지(최대 {max_pages * 100}건) 누락 전수 감사 시작...")
+    missing_count = 0
+    scanned_count = 0
+
+    for page in range(1, max_pages + 1):
+        try:
+            posts = parse_list_page(gallery_id, page=page)
+            if not posts:
+                break
+            scanned_count += len(posts)
+
+            post_ids = [p[0] for p in posts]
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT post_id FROM dc_posts WHERE post_id = ANY(%s)", (post_ids,))
+                    existing = {row[0] for row in cur.fetchall()}
+
+            missing = [p for p in posts if p[0] not in existing]
+            if missing:
+                records = []
+                for p in missing:
+                    body = fetch_post_content(p[1], p[0])
+                    records.append((p[0], p[1], p[2], body, p[4], p[5], p[6]))
+                    time.sleep(0.05)
+                save_metadata_batch(records)
+                missing_count += len(records)
+                log("누락감사", f"📥 Page {page}에서 누락 글 {len(records)}건 발견 및 즉시 보충 완료!")
+
+            time.sleep(0.1)
+        except Exception as e:
+            log("누락감사", f"⚠️ Page {page} 감사 중 오류: {e}")
+            time.sleep(1)
+
+    log("누락감사", f"✅ 누락 전수 감사 완료: 총 {scanned_count}건 스캔 중 누락본 {missing_count}건 보충됨")
+    return {"scanned_count": scanned_count, "missing_count": missing_count}
+
 if __name__ == "__main__":
     init_db()
 
@@ -331,5 +372,9 @@ if __name__ == "__main__":
     t_analyzer = threading.Thread(target=run_analyzer_loop, daemon=True)
     t_analyzer.start()
 
-    # 4. 메인 스레드에서 실시간 모니터링 실행
+    # 4. 시작 시 최근 50페이지(5,000건) 누락 글 전수 감사 백그라운드 1회 실행
+    t_reconcile = threading.Thread(target=reconcile_recent_posts, kwargs={"max_pages": 50}, daemon=True)
+    t_reconcile.start()
+
+    # 5. 메인 스레드에서 실시간 모니터링 실행
     realtime_worker()

@@ -719,6 +719,29 @@ async def discord_subscribe(request: Request):
     }
 
 
+@app.post("/api/discord/unsubscribe")
+async def discord_unsubscribe(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "message": "잘못된 요청 형식입니다."}, status_code=400)
+
+    url = (body.get("webhook_url") or "").strip()
+    if not url:
+        return JSONResponse({"success": False, "message": "해제할 디스코드 웹훅 URL을 입력해주세요."}, status_code=400)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM discord_webhooks WHERE webhook_url = %s", (url,))
+            deleted = cur.rowcount
+        conn.commit()
+
+    if deleted > 0:
+        return {"success": True, "message": "디스코드 웹훅 알림 연동이 성공적으로 해제(삭제)되었습니다."}
+    return JSONResponse({"success": False, "message": "등록 내역에 존재하지 않는 웹훅 URL입니다."}, status_code=404)
+
+
+
 @app.get("/api/admin/webhooks")
 def admin_get_webhooks(request: Request):
     if not verify_admin(request):

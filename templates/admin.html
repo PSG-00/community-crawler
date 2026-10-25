@@ -85,18 +85,11 @@
                     ② <b>🛡️ 보호 단어(화이트리스트)</b>: 만약 자동 학습이 제외하면 안 되는 단어를 잡았다면 <b>[🛡️ 보호]</b> 버튼만 누르세요. 영구히 제외 대상에서 보호됩니다.
                 </p>
             </div>
-            <div class="flex flex-col sm:flex-row gap-2 shrink-0 w-full sm:w-auto">
-                <button type="button" id="reconcileBtn" onclick="triggerReconcile()"
-                        class="bg-indigo-900/90 hover:bg-indigo-800 text-indigo-100 font-bold text-xs sm:text-sm px-3.5 py-3 rounded-xl border border-indigo-500/50 transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shadow-sm">
-                    <i id="reconcileIcon" class="fa-solid fa-magnifying-glass-arrow-right text-indigo-300"></i>
-                    <span id="reconcileBtnText">크롤러 가동 이후 전수 재검증 (7일치)</span>
-                </button>
-                <button type="button" id="rebuildBtn" onclick="triggerRebuild()"
-                        class="bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs sm:text-sm px-4 py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
-                    <i id="rebuildIcon" class="fa-solid fa-wand-magic-sparkles"></i>
-                    <span id="rebuildBtnText">지금 24h 패턴 학습 & 토픽 재구축</span>
-                </button>
-            </div>
+            <button type="button" id="rebuildBtn" onclick="triggerRebuild()"
+                    class="shrink-0 w-full sm:w-auto bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs sm:text-sm px-4 py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
+                <i id="rebuildIcon" class="fa-solid fa-wand-magic-sparkles"></i>
+                <span id="rebuildBtnText">지금 24h 패턴 학습 & 토픽 재구축</span>
+            </button>
         </div>
 
         <!-- 2. 학습 노트 통계 요약 카드 -->
@@ -742,52 +735,6 @@
             });
             await loadAdminData();
             showToast('토픽 카드를 삭제했습니다.', '<i class="fa-solid fa-trash-can text-rose-400"></i>');
-        }
-
-        let auditPollTimer = null;
-
-        async function triggerReconcile() {
-            const btn = document.getElementById('reconcileBtn');
-            const icon = document.getElementById('reconcileIcon');
-            const txt = document.getElementById('reconcileBtnText');
-            btn.disabled = true;
-            icon.className = "fa-solid fa-spinner fa-spin text-indigo-300";
-            txt.innerText = "전수 재검증 시작 중...";
-
-            try {
-                const res = await fetch('/api/admin/deep-audit/start?days=7', {method: 'POST'});
-                const data = await res.json();
-                showToast('크롤러 가동 이후(최근 7일치/5만건) 전수 재검증을 시작했습니다.', '<i class="fa-solid fa-clock-rotate-left text-indigo-400"></i>');
-
-                if (auditPollTimer) clearInterval(auditPollTimer);
-                auditPollTimer = setInterval(async () => {
-                    try {
-                        const sRes = await fetch('/api/admin/deep-audit/status');
-                        const sData = await sRes.json();
-                        const st = sData.state || {};
-                        if (st.is_running) {
-                            txt.innerText = `검사 중: Page ${st.current_page} (${st.scanned_posts.toLocaleString()}건 / 누락본 ${st.recovered_posts}건)`;
-                        } else {
-                            clearInterval(auditPollTimer);
-                            btn.disabled = false;
-                            icon.className = "fa-solid fa-magnifying-glass-arrow-right text-indigo-300";
-                            txt.innerText = "크롤러 가동 이후 전수 재검증 (7일치)";
-                            showToast(`전수 재검증 완료: 총 ${st.scanned_posts.toLocaleString()}건 검사, 누락본 ${st.recovered_posts}건 보충됨!`, '<i class="fa-solid fa-circle-check text-emerald-400"></i>');
-                        }
-                    } catch (e) {
-                        clearInterval(auditPollTimer);
-                        btn.disabled = false;
-                        icon.className = "fa-solid fa-magnifying-glass-arrow-right text-indigo-300";
-                        txt.innerText = "크롤러 가동 이후 전수 재검증 (7일치)";
-                    }
-                }, 2000);
-
-            } catch (err) {
-                showToast('재검증 시작 중 오류가 발생했습니다.', '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>');
-                btn.disabled = false;
-                icon.className = "fa-solid fa-magnifying-glass-arrow-right text-indigo-300";
-                txt.innerText = "크롤러 가동 이후 전수 재검증 (7일치)";
-            }
         }
 
         async function triggerRebuild() {

@@ -220,14 +220,46 @@ def content_fill_worker():
 
 # ================= 3. 실시간 모니터링 루프 (최신 글 즉시 수집) =================
 def realtime_worker():
-    log("실시간", "👀 실시간 15초 모니터링 가동 (새 글 즉시 반영)")
+    log("실시간", "👀 실시간 15초 모니터링 가동 (갭 감지 동적 페이징 탑재)")
     last_cleanup = None
     consecutive_empty = 0
 
+    # DB에 보관된 가장 최신 post_id 로드
+    last_seen_id = None
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(post_id) FROM dc_posts WHERE gallery_id = %s", (GALLERY_ID,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    last_seen_id = int(row[0])
+                    log("실시간", f"📍 최근 기준 글 번호(post_id): {last_seen_id}")
+    except Exception as e:
+        log("실시간", f"초기 글 번호 조회 실패: {e}")
+        last_seen_id = None
+
     while True:
         try:
-            # 최신 1페이지 확인 (15초 주기는 1페이지만으로 충분하며 디시 요청 부하 50% 절감)
-            recent_posts = parse_list_page(GALLERY_ID, page=1)
+            # 기본 1페이지부터 시작하되, 직전 수집 시점 글 번호(last_seen_id)와 갭이 생기면 2, 3페이지로 동적 확장
+            recent_posts = []
+            page = 1
+            max_pages = 5  # 도배 폭발 시 최대 500건까지 한 번에 추적
+
+            while page <= max_pages:
+                page_posts = parse_list_page(GALLERY_ID, page=page)
+                if not page_posts:
+                    break
+                recent_posts.extend(page_posts)
+
+                # 만약 이미 알고 있는 최신 글 번호(last_seen_id) 이하의 글이 현재 페이지에 포함되어 있다면,
+                # 직전 수집 시점과 완벽하게 연결된 것이므로 다음 페이지를 볼 필요 없이 즉시 완료!
+                oldest_in_page = min(p[0] for p in page_posts)
+                if last_seen_id is not None and oldest_in_page <= last_seen_id:
+                    break
+
+                # 최초 실행이거나 화력이 폭발하여 1페이지 100건이 모두 신규 글인 경우 다음 페이지 추가 확인
+                page += 1
+                time.sleep(0.1)
 
             if not recent_posts:
                 consecutive_empty += 1
@@ -240,6 +272,11 @@ def realtime_worker():
                 continue
 
             consecutive_empty = 0
+
+            # 이번 루프에서 확인한 가장 최신 글 번호 갱신
+            current_max_id = max(p[0] for p in recent_posts)
+            if last_seen_id is None or current_max_id > last_seen_id:
+                last_seen_id = current_max_id
 
             # 신규 글만 필터링
             post_ids = [p[0] for p in recent_posts]

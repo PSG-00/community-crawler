@@ -607,6 +607,23 @@ def admin_rebuild_topics(request: Request):
     return {"success": True, "rebuilt_topics": rebuilt_cnt}
 
 
+@app.post("/api/admin/deep-audit/start")
+def admin_start_deep_audit(request: Request, days: int = Query(7, ge=1, le=30)):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    from crawler import run_deep_audit
+    state = run_deep_audit(days=days)
+    return {"success": True, "state": state}
+
+
+@app.get("/api/admin/deep-audit/status")
+def admin_get_deep_audit_status(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    from crawler import get_deep_audit_state
+    return {"success": True, "state": get_deep_audit_state()}
+
+
 @app.post("/api/admin/reconcile")
 def admin_reconcile_posts(request: Request, pages: int = Query(30, ge=5, le=100)):
     if not verify_admin(request):

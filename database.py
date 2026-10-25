@@ -93,6 +93,18 @@ def init_db():
         UNIQUE(gallery_id, pattern_type, target_text)
     );
     CREATE INDEX IF NOT EXISTS idx_learning_notes_gallery_status ON learning_notes (gallery_id, status);
+
+    -- 디스코드 실시간 떡밥 알림 웹훅 테이블
+    CREATE TABLE IF NOT EXISTS discord_webhooks (
+        webhook_id SERIAL PRIMARY KEY,
+        gallery_id VARCHAR(50) NOT NULL DEFAULT 'rescene1',
+        webhook_url TEXT NOT NULL UNIQUE,
+        channel_name VARCHAR(100) DEFAULT '',
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+        last_sent_at TIMESTAMP WITHOUT TIME ZONE
+    );
+    CREATE INDEX IF NOT EXISTS idx_discord_webhooks_gallery_active ON discord_webhooks (gallery_id, is_active);
     """
     with get_db() as conn:
         with conn.cursor() as cur:

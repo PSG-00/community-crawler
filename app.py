@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from database import get_db
 from analyzer import TopicAnalyzer
+from notifier import validate_webhook_url, send_test_webhook
 
 app = FastAPI(title="DC Inside Community 90-Day Archive Search")
 templates = Jinja2Templates(directory="templates")
@@ -665,5 +666,150 @@ def admin_top_authors(request: Request, days: int = Query(0, ge=0, le=90)):
                     "first_active": r[4].strftime("%m/%d %H:%M") if r[4] else "",
                 })
     return {"top_authors": top_authors, "days": days}
+
+
+# ==================== Discord Webhook Endpoints ====================
+
+@app.post("/api/discord/subscribe")
+async def discord_subscribe(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "message": "잘못된 요청 형식입니다."}, status_code=400)
+
+    url = (body.get("webhook_url") or "").strip()
+    channel_name = (body.get("channel_name") or "").strip()
+
+    if not url:
+        return JSONResponse({"success": False, "message": "디스코드 웹훅 URL을 입력해주세요."}, status_code=400)
+
+    if not validate_webhook_url(url):
+        return JSONResponse({
+            "success": False,
+            "message": "올바른 디스코드 웹훅 URL 형식이 아닙니다.\n(https://discord.com/api/webhooks/...)"
+        }, status_code=400)
+
+    # 1. 즉시 디스코드로 연결 테스트 전송
+    ok, test_msg = send_test_webhook(url, channel_name)
+    if not ok:
+        return JSONResponse({
+            "success": False,
+            "message": f"웹훅 전송에 실패했습니다: {test_msg}\nURL이 올바른지 확인해주세요."
+        }, status_code=400)
+
+    # 2. DB 저장 (이미 등록된 URL이면 활성화 및 채널명 업데이트)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO discord_webhooks (gallery_id, webhook_url, channel_name, is_active, created_at, last_sent_at)
+                VALUES ('rescene1', %s, %s, TRUE, NOW(), NOW())
+                ON CONFLICT (webhook_url)
+                DO UPDATE SET
+                    is_active = TRUE,
+                    channel_name = COALESCE(NULLIF(EXCLUDED.channel_name, ''), discord_webhooks.channel_name),
+                    last_sent_at = NOW()
+                RETURNING webhook_id;
+            """, (url, channel_name))
+            wh_id = cur.fetchone()[0]
+        conn.commit()
+
+    return {
+        "success": True,
+        "message": "디스코드 웹훅이 성공적으로 등록되었습니다! 디스코드 채널에서 환영 메시지를 확인해보세요."
+    }
+
+
+@app.get("/api/admin/webhooks")
+def admin_get_webhooks(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT webhook_id, webhook_url, channel_name, is_active, created_at, last_sent_at
+                FROM discord_webhooks
+                WHERE gallery_id = 'rescene1'
+                ORDER BY created_at DESC;
+            """)
+            rows = cur.fetchall()
+
+    webhooks = []
+    for r in rows:
+        wh_url = r[1]
+        parts = wh_url.split("/")
+        masked_url = "/".join(parts[:-1]) + "/••••••••" if len(parts) >= 6 else wh_url
+
+        webhooks.append({
+            "webhook_id": r[0],
+            "masked_url": masked_url,
+            "channel_name": r[2] or "이름 없음",
+            "is_active": bool(r[3]),
+            "created_at": r[4].strftime("%m/%d %H:%M") if r[4] else "",
+            "last_sent_at": r[5].strftime("%m/%d %H:%M") if r[5] else "전송 기록 없음",
+        })
+
+    return {"webhooks": webhooks}
+
+
+@app.post("/api/admin/webhooks/status")
+async def admin_update_webhook_status(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    wh_id = body.get("webhook_id")
+    is_active = body.get("is_active")
+    if wh_id is None or is_active is None:
+        return JSONResponse({"success": False, "message": "잘못된 요청입니다."}, status_code=400)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE discord_webhooks SET is_active = %s WHERE webhook_id = %s", (bool(is_active), int(wh_id)))
+        conn.commit()
+    return {"success": True}
+
+
+@app.post("/api/admin/webhooks/delete")
+async def admin_delete_webhook(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    wh_id = body.get("webhook_id")
+    if not wh_id:
+        return JSONResponse({"success": False, "message": "webhook_id가 필요합니다."}, status_code=400)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM discord_webhooks WHERE webhook_id = %s", (int(wh_id),))
+        conn.commit()
+    return {"success": True}
+
+
+@app.post("/api/admin/webhooks/test")
+async def admin_test_webhook(request: Request):
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    wh_id = body.get("webhook_id")
+    if not wh_id:
+        return JSONResponse({"success": False, "message": "webhook_id가 필요합니다."}, status_code=400)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT webhook_url, channel_name FROM discord_webhooks WHERE webhook_id = %s", (int(wh_id),))
+            row = cur.fetchone()
+
+    if not row:
+        return JSONResponse({"success": False, "message": "해당 웹훅을 찾을 수 없습니다."}, status_code=404)
+
+    ok, msg = send_test_webhook(row[0], row[1])
+    if ok:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE discord_webhooks SET last_sent_at = NOW() WHERE webhook_id = %s", (int(wh_id),))
+            conn.commit()
+        return {"success": True, "message": "테스트 알림을 성공적으로 발송했습니다."}
+    return JSONResponse({"success": False, "message": msg}, status_code=400)
+
 
 

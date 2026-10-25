@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from database import get_db
 from topic_engine import build_word_note_clusters, extract_learning_candidates_from_24h
+from notifier import send_new_topic_notification
 
 KST = timezone(timedelta(hours=9))
 
@@ -133,10 +134,11 @@ class TopicAnalyzer:
         log("학습노트", f"📒 최근 24시간 패턴 학습 완료 ({upserted}개 항목 갱신)")
         return upserted
 
-    def save_event(self, start_dt, end_dt, cluster_id, event_info):
+    def save_event(self, start_dt, end_dt, cluster_id, event_info, is_realtime=False):
         """
         gallery_events 테이블에 저장:
         - 60분 이내 인접 구간에서 동일 토픽으로 판정되는 기존 이벤트들을 모두 찾아 하나로 통합(중복 파편 카드 제거)!
+        - 신규 떡밥 감지(INSERT) 시 활성 디스코드 웹훅으로 실시간 알림 발송!
         """
         kw_json = json.dumps(event_info["keywords"], ensure_ascii=False)
         core_names = [k["word"] for k in event_info["keywords"] if not k.get("is_assoc")]
@@ -268,9 +270,16 @@ class TopicAnalyzer:
                 ))
                 new_id = cur.fetchone()[0]
             conn.commit()
+
+            if is_realtime:
+                try:
+                    send_new_topic_notification(event_info, start_dt, end_dt, self.gallery_id)
+                except Exception as err:
+                    log("디스코드오류", f"웹훅 전송 중 오류: {err}")
+
         return new_id
 
-    def analyze_window(self, end_dt=None, window_minutes=90, learned_rules=None):
+    def analyze_window(self, end_dt=None, window_minutes=90, learned_rules=None, is_realtime=False):
         """
         LLM 무사용 100% 단어 노트 & 동시출현 연관성 클러스터 분석 (학습 노트 연동)
         """
@@ -302,7 +311,7 @@ class TopicAnalyzer:
         for idx, ev in enumerate(clusters, 1):
             ev_start = ev.get("actual_start") or start_dt
             ev_end = ev.get("actual_end") or end_dt
-            eid = self.save_event(ev_start, ev_end, idx, ev)
+            eid = self.save_event(ev_start, ev_end, idx, ev, is_realtime=is_realtime)
             if eid:
                 saved_events.append((eid, ev["title"]))
                 kw_summary = [f"{k['word']} {k['lift']}x" for k in ev["keywords"][:4]]
@@ -333,7 +342,7 @@ class TopicAnalyzer:
             target_end = now_k - timedelta(minutes=30 * step)
             try:
                 events = self.analyze_window(
-                    end_dt=target_end, window_minutes=90, learned_rules=learned_rules
+                    end_dt=target_end, window_minutes=90, learned_rules=learned_rules, is_realtime=False
                 )
                 total_created += len(events)
             except Exception as e:
@@ -358,7 +367,7 @@ def run_analyzer_loop():
             # 30분(10사이클)마다 최근 24시간 학습 노트 자동 업데이트
             if cycle % 10 == 0:
                 analyzer.sync_learning_notes()
-            analyzer.analyze_window(end_dt=get_now_kst(), window_minutes=90)
+            analyzer.analyze_window(end_dt=get_now_kst(), window_minutes=90, is_realtime=True)
         except Exception as e:
             log("트렌드감지기", f"분석 오류: {e}")
 

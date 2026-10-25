@@ -166,6 +166,11 @@
                     <i class="fa-solid fa-trophy text-amber-500"></i>
                     <span>🏆 식별코드 순위 (TOP 30)</span>
                 </button>
+                <button type="button" id="adminTabWebhooks" onclick="switchAdminTab('webhooks')"
+                        class="px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1.5">
+                    <i class="fa-brands fa-discord text-[#5865F2]"></i>
+                    <span>📢 디코 웹훅 연동</span>
+                </button>
             </div>
 
             <!-- 카테고리 필터 칩 -->
@@ -227,6 +232,57 @@
             </div>
         </div>
 
+        <!-- 섹션 D: 디스코드 웹훅 연동 관리 -->
+        <div id="sectionWebhooks" class="hidden space-y-4">
+            <!-- 웹훅 등록 폼 카드 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-3.5 sm:p-5 shadow-2xs">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-8 h-8 rounded-xl bg-[#5865F2]/10 text-[#5865F2] flex items-center justify-center text-base">
+                        <i class="fa-brands fa-discord"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm sm:text-base font-bold text-slate-900">새 디스코드 채널 웹훅 등록</h3>
+                        <p class="text-xs text-slate-500">새로운 떡밥이 감지될 때마다 디코 채널로 실시간 알림 임베드를 전송합니다.</p>
+                    </div>
+                </div>
+                <form onsubmit="addAdminWebhook(event)" class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                    <div class="sm:col-span-7">
+                        <input type="url" id="adminWebhookUrl" placeholder="https://discord.com/api/webhooks/..." required
+                               class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#5865F2]">
+                    </div>
+                    <div class="sm:col-span-3">
+                        <input type="text" id="adminWebhookName" placeholder="채널/서버 이름 (선택)"
+                               class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm focus:outline-none focus:border-[#5865F2]">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <button type="submit" id="adminWebhookAddBtn"
+                                class="w-full h-full bg-[#5865F2] hover:bg-[#4752C4] text-white font-bold text-xs sm:text-sm py-2.5 px-3 rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-plus text-xs"></i>
+                            <span>웹훅 추가</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 웹훅 목록 카드 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-3.5 sm:p-5 shadow-2xs">
+                <div class="flex items-center justify-between gap-2 mb-3">
+                    <h4 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                        <i class="fa-solid fa-tower-broadcast text-indigo-600"></i>
+                        <span>등록된 웹훅 채널 목록</span>
+                    </h4>
+                    <button type="button" onclick="loadWebhooks()"
+                            class="p-1.5 px-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 rounded-lg text-xs transition cursor-pointer flex items-center gap-1">
+                        <i class="fa-solid fa-rotate-right"></i>
+                        <span>새로고침</span>
+                    </button>
+                </div>
+                <div id="webhooksList" class="space-y-2.5">
+                    <div class="text-center py-8 text-slate-400 text-sm">웹훅 목록을 불러오는 중...</div>
+                </div>
+            </div>
+        </div>
+
         {% endif %}
     </main>
 
@@ -270,14 +326,17 @@
             const secNotes = document.getElementById('sectionNotes');
             const secTopics = document.getElementById('sectionTopics');
             const secAuthors = document.getElementById('sectionAuthors');
+            const secWebhooks = document.getElementById('sectionWebhooks');
             const tabNotes = document.getElementById('adminTabNotes');
             const tabTopics = document.getElementById('adminTabTopics');
             const tabAuthors = document.getElementById('adminTabAuthors');
+            const tabWebhooks = document.getElementById('adminTabWebhooks');
             const filterBar = document.getElementById('noteFilterBar');
 
             if (secNotes) secNotes.classList.add('hidden');
             if (secTopics) secTopics.classList.add('hidden');
             if (secAuthors) secAuthors.classList.add('hidden');
+            if (secWebhooks) secWebhooks.classList.add('hidden');
             if (filterBar) filterBar.classList.add('hidden');
 
             const activeClass = "px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 cursor-pointer flex items-center gap-1.5";
@@ -286,6 +345,7 @@
             if (tabNotes) tabNotes.className = inactiveClass;
             if (tabTopics) tabTopics.className = inactiveClass;
             if (tabAuthors) tabAuthors.className = inactiveClass;
+            if (tabWebhooks) tabWebhooks.className = inactiveClass;
 
             if (tab === 'topics') {
                 if (secTopics) secTopics.classList.remove('hidden');
@@ -296,6 +356,10 @@
                 if (topAuthors.length === 0) {
                     loadTopAuthors(currentAuthorDays);
                 }
+            } else if (tab === 'webhooks') {
+                if (secWebhooks) secWebhooks.classList.remove('hidden');
+                if (tabWebhooks) tabWebhooks.className = activeClass;
+                loadWebhooks();
             } else {
                 if (secNotes) secNotes.classList.remove('hidden');
                 if (filterBar) filterBar.classList.remove('hidden');
@@ -697,6 +761,306 @@
         document.addEventListener('DOMContentLoaded', () => {
             loadAdminData();
         });
+
+        // ================= 디스코드 웹훅 관리 =================
+        let adminWebhooks = [];
+
+        async function loadWebhooks() {
+            const container = document.getElementById('webhooksList');
+            if (!container) return;
+            container.innerHTML = `<div class="text-center py-8 text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin mr-1.5 text-indigo-500"></i>웹훅 목록을 불러오는 중...</div>`;
+
+            try {
+                const res = await fetch('/api/admin/webhooks');
+                if (!res.ok) throw new Error('Failed');
+                const data = await res.json();
+                adminWebhooks = data.webhooks || [];
+                renderWebhooks();
+            } catch (err) {
+                container.innerHTML = `<div class="text-center py-8 text-rose-500 text-sm">웹훅 목록을 불러오지 못했습니다.</div>`;
+            }
+        }
+
+        function renderWebhooks() {
+            const container = document.getElementById('webhooksList');
+            if (!container) return;
+
+            if (adminWebhooks.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-slate-50 rounded-2xl border border-dashed border-slate-300 p-8 text-center">
+                        <i class="fa-brands fa-discord text-3xl text-slate-300 mb-2"></i>
+                        <p class="text-sm font-bold text-slate-700">등록된 디스코드 웹훅이 없습니다.</p>
+                        <p class="text-xs text-slate-500 mt-1">상단에서 디스코드 채널 웹훅 URL을 입력하여 새 채널을 연동해보세요.</p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = adminWebhooks.map(w => {
+                const statusBadge = w.is_active
+                    ? `<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-md">✅ 전송 활성</span>`
+                    : `<span class="bg-slate-100 text-slate-500 border border-slate-200 text-[10px] font-semibold px-2 py-0.5 rounded-md">⏸️ 일시 정지</span>`;
+
+                return `
+                <div class="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:border-slate-300 transition">
+                    <div class="space-y-1 min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            ${statusBadge}
+                            <span class="text-sm font-extrabold text-slate-900">${escapeHtml(w.channel_name)}</span>
+                            <span class="text-[11px] text-slate-400">등록: ${escapeHtml(w.created_at)}</span>
+                        </div>
+                        <div class="font-mono text-xs text-slate-500 truncate max-w-lg">
+                            ${escapeHtml(w.masked_url)}
+                        </div>
+                        <div class="text-[11px] text-slate-400">
+                            마지막 알림 발송: <b>${escapeHtml(w.last_sent_at)}</b>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                        <button type="button" onclick="testAdminWebhook(${w.webhook_id})"
+                                class="bg-[#5865F2]/10 hover:bg-[#5865F2] hover:text-white text-[#5865F2] text-xs font-bold px-2.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1">
+                            <i class="fa-solid fa-paper-plane text-[10px]"></i>
+                            <span>테스트</span>
+                        </button>
+                        <button type="button" onclick="toggleAdminWebhook(${w.webhook_id}, ${!w.is_active})"
+                                class="${w.is_active ? 'bg-amber-50 hover:bg-amber-600 hover:text-white text-amber-700 border-amber-200' : 'bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 border-emerald-200'} border text-xs font-semibold px-2.5 py-1.5 rounded-xl transition cursor-pointer">
+                            ${w.is_active ? '일시정지' : '활성화'}
+                        </button>
+                        <button type="button" onclick="deleteAdminWebhook(${w.webhook_id})"
+                                class="bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-600 border border-rose-200 text-xs font-semibold px-2 py-1.5 rounded-xl transition cursor-pointer">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        async function addAdminWebhook(e) {
+            e.preventDefault();
+            const urlInput = document.getElementById('adminWebhookUrl');
+            const nameInput = document.getElementById('adminWebhookName');
+            const webhook_url = urlInput.value.trim();
+            const channel_name = nameInput.value.trim();
+            if (!webhook_url) return;
+
+            const btn = document.getElementById('adminWebhookAddBtn');
+            btn.disabled = true;
+            btn.innerText = "연동 확인 중...";
+
+            try {
+                const res = await fetch('/api/discord/subscribe', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({webhook_url, channel_name})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    urlInput.value = '';
+                    nameInput.value = '';
+                    showToast(data.message, '<i class="fa-brands fa-discord text-[#5865F2]"></i>');
+                    await loadWebhooks();
+                } else {
+                    alert(data.message || '웹훅 등록에 실패했습니다.');
+                }
+            } catch (err) {
+                alert('서버 통신 오류가 발생했습니다.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-plus text-xs"></i><span>웹훅 추가</span>';
+            }
+        }
+
+        async function toggleAdminWebhook(whId, nextActive) {
+            await fetch('/api/admin/webhooks/status', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({webhook_id: whId, is_active: nextActive})
+            });
+            showToast(nextActive ? '웹훅 알림을 활성화했습니다.' : '웹훅 알림을 일시정지했습니다.');
+            await loadWebhooks();
+        }
+
+        async function deleteAdminWebhook(whId) {
+            if (!confirm('이 디스코드 웹훅 연동을 삭제하시겠습니까?')) return;
+            await fetch('/api/admin/webhooks/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({webhook_id: whId})
+            });
+            showToast('디스코드 웹훅을 삭제했습니다.', '<i class="fa-solid fa-trash-can text-rose-400"></i>');
+            await loadWebhooks();
+        }
+
+        async function testAdminWebhook(whId) {
+            showToast('디스코드 테스트 알림 발송 중...', '<i class="fa-solid fa-spinner fa-spin text-indigo-400"></i>');
+            try {
+                const res = await fetch('/api/admin/webhooks/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({webhook_id: whId})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('테스트 메시지가 성공적으로 발송되었습니다!', '<i class="fa-brands fa-discord text-[#5865F2]"></i>');
+                    await loadWebhooks();
+                } else {
+                    alert(data.message || '테스트 발송에 실패했습니다.');
+                }
+            } catch (err) {
+                alert('서버 통신 오류가 발생했습니다.');
+            }
+        }
+
+
+        // ================= 디스코드 웹훅 관리 =================
+        let adminWebhooks = [];
+
+        async function loadWebhooks() {
+            const container = document.getElementById('webhooksList');
+            if (!container) return;
+            container.innerHTML = `<div class="text-center py-8 text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin mr-1.5 text-indigo-500"></i>웹훅 목록을 불러오는 중...</div>`;
+
+            try {
+                const res = await fetch('/api/admin/webhooks');
+                if (!res.ok) throw new Error('Failed');
+                const data = await res.json();
+                adminWebhooks = data.webhooks || [];
+                renderWebhooks();
+            } catch (err) {
+                container.innerHTML = `<div class="text-center py-8 text-rose-500 text-sm">웹훅 목록을 불러오지 못했습니다.</div>`;
+            }
+        }
+
+        function renderWebhooks() {
+            const container = document.getElementById('webhooksList');
+            if (!container) return;
+
+            if (adminWebhooks.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-slate-50 rounded-2xl border border-dashed border-slate-300 p-8 text-center">
+                        <i class="fa-brands fa-discord text-3xl text-slate-300 mb-2"></i>
+                        <p class="text-sm font-bold text-slate-700">등록된 디스코드 웹훅이 없습니다.</p>
+                        <p class="text-xs text-slate-500 mt-1">상단에서 디스코드 채널 웹훅 URL을 입력하여 새 채널을 연동해보세요.</p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = adminWebhooks.map(w => {
+                const statusBadge = w.is_active
+                    ? `<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-md">✅ 전송 활성</span>`
+                    : `<span class="bg-slate-100 text-slate-500 border border-slate-200 text-[10px] font-semibold px-2 py-0.5 rounded-md">⏸️ 일시 정지</span>`;
+
+                return `
+                <div class="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:border-slate-300 transition">
+                    <div class="space-y-1 min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            ${statusBadge}
+                            <span class="text-sm font-extrabold text-slate-900">${escapeHtml(w.channel_name)}</span>
+                            <span class="text-[11px] text-slate-400">등록: ${escapeHtml(w.created_at)}</span>
+                        </div>
+                        <div class="font-mono text-xs text-slate-500 truncate max-w-lg">
+                            ${escapeHtml(w.masked_url)}
+                        </div>
+                        <div class="text-[11px] text-slate-400">
+                            마지막 알림 발송: <b>${escapeHtml(w.last_sent_at)}</b>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                        <button type="button" onclick="testAdminWebhook(${w.webhook_id})"
+                                class="bg-[#5865F2]/10 hover:bg-[#5865F2] hover:text-white text-[#5865F2] text-xs font-bold px-2.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1">
+                            <i class="fa-solid fa-paper-plane text-[10px]"></i>
+                            <span>테스트</span>
+                        </button>
+                        <button type="button" onclick="toggleAdminWebhook(${w.webhook_id}, ${!w.is_active})"
+                                class="${w.is_active ? 'bg-amber-50 hover:bg-amber-600 hover:text-white text-amber-700 border-amber-200' : 'bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 border-emerald-200'} border text-xs font-semibold px-2.5 py-1.5 rounded-xl transition cursor-pointer">
+                            ${w.is_active ? '일시정지' : '활성화'}
+                        </button>
+                        <button type="button" onclick="deleteAdminWebhook(${w.webhook_id})"
+                                class="bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-600 border border-rose-200 text-xs font-semibold px-2 py-1.5 rounded-xl transition cursor-pointer">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        async function addAdminWebhook(e) {
+            e.preventDefault();
+            const urlInput = document.getElementById('adminWebhookUrl');
+            const nameInput = document.getElementById('adminWebhookName');
+            const webhook_url = urlInput.value.trim();
+            const channel_name = nameInput.value.trim();
+            if (!webhook_url) return;
+
+            const btn = document.getElementById('adminWebhookAddBtn');
+            btn.disabled = true;
+            btn.innerText = "연동 확인 중...";
+
+            try {
+                const res = await fetch('/api/discord/subscribe', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({webhook_url, channel_name})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    urlInput.value = '';
+                    nameInput.value = '';
+                    showToast(data.message, '<i class="fa-brands fa-discord text-[#5865F2]"></i>');
+                    await loadWebhooks();
+                } else {
+                    alert(data.message || '웹훅 등록에 실패했습니다.');
+                }
+            } catch (err) {
+                alert('서버 통신 오류가 발생했습니다.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-plus text-xs"></i><span>웹훅 추가</span>';
+            }
+        }
+
+        async function toggleAdminWebhook(whId, nextActive) {
+            await fetch('/api/admin/webhooks/status', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({webhook_id: whId, is_active: nextActive})
+            });
+            showToast(nextActive ? '웹훅 알림을 활성화했습니다.' : '웹훅 알림을 일시정지했습니다.');
+            await loadWebhooks();
+        }
+
+        async function deleteAdminWebhook(whId) {
+            if (!confirm('이 디스코드 웹훅 연동을 삭제하시겠습니까?')) return;
+            await fetch('/api/admin/webhooks/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({webhook_id: whId})
+            });
+            showToast('디스코드 웹훅을 삭제했습니다.', '<i class="fa-solid fa-trash-can text-rose-400"></i>');
+            await loadWebhooks();
+        }
+
+        async function testAdminWebhook(whId) {
+            showToast('디스코드 테스트 알림 발송 중...', '<i class="fa-solid fa-spinner fa-spin text-indigo-400"></i>');
+            try {
+                const res = await fetch('/api/admin/webhooks/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({webhook_id: whId})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('테스트 메시지가 성공적으로 발송되었습니다!', '<i class="fa-brands fa-discord text-[#5865F2]"></i>');
+                    await loadWebhooks();
+                } else {
+                    alert(data.message || '테스트 발송에 실패했습니다.');
+                }
+            } catch (err) {
+                alert('서버 통신 오류가 발생했습니다.');
+            }
+        }
+
     </script>
 
     <!-- 검정색 토스트 알림 팝업 -->

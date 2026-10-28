@@ -1,6 +1,7 @@
 """
 notifier.py — 실시간 토픽 감지 시 디스코드 웹훅(Discord Webhook)으로 알림을 전송하는 모듈
 """
+import os
 import json
 import re
 import urllib.request
@@ -12,7 +13,7 @@ from database import get_db
 
 KST = timezone(timedelta(hours=9))
 WEBHOOK_REGEX = re.compile(r'^https://(discord\.com|discordapp\.com)/api/webhooks/\d+/[A-Za-z0-9_-]+$')
-SITE_BASE_URL = "http://43.201.125.61"
+SITE_BASE_URL = os.environ.get("SITE_BASE_URL", "https://archive.rescene.online").rstrip("/")
 
 
 def validate_webhook_url(url: str) -> bool:
@@ -130,7 +131,15 @@ def send_new_topic_notification(event_info: dict, start_dt, end_dt, gallery_id: 
 
         search_query = " OR ".join(search_words[:3]) if search_words else ""
         encoded_query = urllib.parse.quote(search_query)
-        archive_link = f"{SITE_BASE_URL}/?q={encoded_query}&target=all" if search_query else SITE_BASE_URL
+        if start_dt and end_dt:
+            s_iso = (start_dt - timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M')
+            e_iso = (end_dt + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M')
+            archive_link = (
+                f"{SITE_BASE_URL}/?q={encoded_query}&target=all&period=custom&start_date={s_iso}&end_date={e_iso}"
+                if search_query else f"{SITE_BASE_URL}/#topics"
+            )
+        else:
+            archive_link = f"{SITE_BASE_URL}/?q={encoded_query}&target=all" if search_query else f"{SITE_BASE_URL}/#topics"
 
         embed_payload = {
             "username": "리센느 토픽 알리미",

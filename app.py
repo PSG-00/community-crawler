@@ -523,7 +523,8 @@ async def admin_add_note(request: Request):
         raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
     body = await request.json()
     p_type = (body.get("pattern_type") or "manual_stop").strip()
-    target_text = (body.get("target_text") or "").strip()
+    raw_text = (body.get("target_text") or "").strip()
+    target_text = raw_text.lstrip("#").strip()
     reason = (body.get("reason") or "").strip()
 
     if not target_text:
@@ -540,6 +541,84 @@ async def admin_add_note(request: Request):
 
     with get_db() as conn:
         with conn.cursor() as cur:
+            # 1. 이미 동일 단어/문구가 학습 노트에 존재하는지 확인
+            cur.execute("""
+                SELECT note_id, pattern_type, status, reason, target_text
+                FROM learning_notes
+                WHERE gallery_id = 'rescene1' AND LOWER(target_text) = LOWER(%s)
+            """, (target_text,))
+            existing = cur.fetchone()
+
+            if existing:
+                e_id, e_type, e_status, e_reason, e_orig_text = existing
+                # 이미 동일한 상태(active 또는 protected)로 적용 중인 경우
+                if e_status == status:
+                    if reason and reason != e_reason:
+                        cur.execute("""
+                            UPDATE learning_notes
+                            SET reason = %s, updated_at = NOW()
+                            WHERE note_id = %s
+                        """, (reason, e_id))
+                        conn.commit()
+
+                    if status == "protected":
+                        msg = f"'{e_orig_text}'은(는) 이미 영구 보호 단어로 처리되어 있습니다."
+                    elif actual_type == "signature_phrase":
+                        msg = f"'{e_orig_text}'은(는) 이미 등록된 서명 문구입니다."
+                    else:
+                        msg = f"'{e_orig_text}'은(는) 이미 처리된 단어입니다."
+
+                    return {
+                        "success": True,
+                        "already_exists": True,
+                        "note_id": e_id,
+                        "message": msg
+                    }
+
+                # 비활성화(disabled) 상태였던 단어를 다시 등록하여 재활성화하는 경우
+                cur.execute("""
+                    UPDATE learning_notes
+                    SET status = %s,
+                        pattern_type = %s,
+                        reason = %s,
+                        is_manual = TRUE,
+                        updated_at = NOW()
+                    WHERE note_id = %s
+                """, (status, actual_type, reason or default_reason, e_id))
+                conn.commit()
+                return {
+                    "success": True,
+                    "already_exists": False,
+                    "reactivated": True,
+                    "note_id": e_id,
+                    "message": f"'{target_text}' 규칙을 다시 활성화했습니다."
+                }
+
+            # 2. 엔진 내장 기본 불용어(_GENERIC)에 이미 포함되어 있는지 확인
+            from topic_engine import _GENERIC
+            if actual_type == "manual_stop" and (target_text in _GENERIC or target_text.lower() in _GENERIC):
+                cur.execute("""
+                    INSERT INTO learning_notes (
+                        gallery_id, pattern_type, target_text, status,
+                        hit_count, hour_spread, author_count, max_lift,
+                        reason, sample_text, is_manual, updated_at
+                    )
+                    VALUES ('rescene1', %s, %s, %s, 0, 0, 0, 0.0, %s, '관리자 직접 입력', TRUE, NOW())
+                    ON CONFLICT (gallery_id, pattern_type, target_text) DO NOTHING
+                    RETURNING note_id;
+                """, (actual_type, target_text, status, reason or default_reason))
+                row = cur.fetchone()
+                nid = row[0] if row else 0
+                conn.commit()
+                return {
+                    "success": True,
+                    "already_exists": True,
+                    "built_in": True,
+                    "note_id": nid,
+                    "message": f"'{target_text}'은(는) 이미 처리된 단어입니다. (엔진 기본 불용어 내장)"
+                }
+
+            # 3. 신규 단어 정상 등록
             cur.execute("""
                 INSERT INTO learning_notes (
                     gallery_id, pattern_type, target_text, status,
@@ -557,7 +636,12 @@ async def admin_add_note(request: Request):
             """, (actual_type, target_text, status, reason or default_reason))
             nid = cur.fetchone()[0]
         conn.commit()
-    return {"success": True, "note_id": nid}
+    return {
+        "success": True,
+        "already_exists": False,
+        "note_id": nid,
+        "message": f"'{target_text}' 규칙을 등록했습니다."
+    }
 
 
 @app.post("/api/admin/notes/status")

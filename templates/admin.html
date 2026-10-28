@@ -666,16 +666,30 @@
             const reason = document.getElementById('addReasonText').value.trim();
             if (!target_text) return;
 
-            const res = await fetch('/api/admin/notes/add', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({pattern_type, target_text, reason})
-            });
-            if (res.ok) {
-                document.getElementById('addTargetText').value = '';
-                document.getElementById('addReasonText').value = '';
-                await loadAdminData();
-                showToast(`'${target_text}' 규칙을 등록했습니다.`, '<i class="fa-solid fa-plus-circle text-emerald-400"></i>');
+            try {
+                const res = await fetch('/api/admin/notes/add', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({pattern_type, target_text, reason})
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    document.getElementById('addTargetText').value = '';
+                    document.getElementById('addReasonText').value = '';
+                    await loadAdminData();
+                    if (data.already_exists) {
+                        showToast(data.message || `'${target_text}'은(는) 이미 처리된 단어입니다.`, '<i class="fa-solid fa-circle-exclamation text-amber-400"></i>');
+                    } else if (data.reactivated) {
+                        showToast(data.message || `'${target_text}' 규칙을 다시 활성화했습니다.`, '<i class="fa-solid fa-circle-check text-indigo-400"></i>');
+                    } else {
+                        showToast(data.message || `'${target_text}' 규칙을 등록했습니다.`, '<i class="fa-solid fa-plus-circle text-emerald-400"></i>');
+                    }
+                } else {
+                    showToast(data.message || '규칙 등록에 실패했습니다.', '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>');
+                }
+            } catch (err) {
+                console.error("규칙 등록 오류:", err);
+                showToast('서버 통신 중 오류가 발생했습니다.', '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>');
             }
         }
 
@@ -713,17 +727,31 @@
 
         async function quickBlockWord(word) {
             if (!confirm(`'${word}' 단어를 수동 제외 단어(불용어)에 추가하시겠습니까?\n(추가 후 상단 '패턴 학습 & 토픽 재구축'을 누르면 타임라인에 즉시 반영됩니다)`)) return;
-            await fetch('/api/admin/notes/add', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    pattern_type: 'manual_stop',
-                    target_text: word,
-                    reason: '관리자 토픽 카드에서 원클릭 제외 등록'
-                })
-            });
-            await loadAdminData();
-            showToast(`'#${word}' 단어를 수동 제외어로 등록했습니다.`, '<i class="fa-solid fa-ban text-rose-400"></i>');
+            try {
+                const res = await fetch('/api/admin/notes/add', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        pattern_type: 'manual_stop',
+                        target_text: word,
+                        reason: '관리자 토픽 카드에서 원클릭 제외 등록'
+                    })
+                });
+                const data = await res.json();
+                await loadAdminData();
+                if (res.ok && data.success) {
+                    if (data.already_exists) {
+                        showToast(data.message || `'#${word}'은(는) 이미 처리된 단어입니다.`, '<i class="fa-solid fa-circle-exclamation text-amber-400"></i>');
+                    } else {
+                        showToast(data.message || `'#${word}' 단어를 수동 제외어로 등록했습니다.`, '<i class="fa-solid fa-ban text-rose-400"></i>');
+                    }
+                } else {
+                    showToast(data.message || '제외어 등록에 실패했습니다.', '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>');
+                }
+            } catch (err) {
+                console.error("원클릭 제외 등록 오류:", err);
+                showToast('서버 통신 중 오류가 발생했습니다.', '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>');
+            }
         }
 
         async function deleteTopicCard(eventId) {

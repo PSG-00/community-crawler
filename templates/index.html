@@ -258,24 +258,9 @@
                         </a>
                     </div>
 
-                    <!-- 1. 본문 축약 미리보기 (클릭하면 펼쳐짐) -->
-                    {% if item.content_snippet %}
-                    <div id="snippet-{{ item.post_id }}" onclick="togglePostContent('{{ item.post_id }}')" class="cursor-pointer text-xs sm:text-sm text-slate-600 leading-relaxed mb-2.5 line-clamp-2 hover:text-slate-900 transition break-keep break-words">
-                        {{ item.content_snippet | safe }}
-                    </div>
-                    {% endif %}
-
-                    <!-- 2. 본문 전체 펼침 영역 (아카이브 본문 읽기) -->
-                    <div id="full-{{ item.post_id }}" class="hidden my-2.5 p-3 sm:p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 leading-relaxed max-h-[500px] overflow-y-auto post-content">
-                        {% if item.has_content %}
-                        <div class="mb-3 break-keep">
-                            {{ item.full_content | safe }}
-                        </div>
-                        {% else %}
-                        <div class="text-slate-400 italic mb-3">
-                            (본문 텍스트가 없거나 이미지 전용 글입니다)
-                        </div>
-                        {% endif %}
+                    <!-- 본문 전체 펼침 영역 (온디맨드 실시간 삭제 여부 확인 후 표시) -->
+                    <div id="full-{{ item.post_id }}" data-loaded="false" class="hidden my-2.5 p-3 sm:p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 leading-relaxed max-h-[500px] overflow-y-auto post-content">
+                        <div id="full-body-{{ item.post_id }}" class="mb-3 break-keep"></div>
                         <div class="flex justify-between items-center pt-2 border-t border-slate-200/60 text-xs">
                             <a href="{{ item.url }}" target="_blank" class="text-indigo-600 font-semibold hover:underline flex items-center gap-1">
                                 <span>디시인사이드 원본 글 보기</span>
@@ -550,22 +535,81 @@
             }
         }
 
-        // 본문 전체 펼치기 / 접기 토글
-        function togglePostContent(postId) {
+        // 본문 전체 펼치기 / 접기 토글 (온디맨드 디시인사이드 삭제 여부 확인)
+        async function togglePostContent(postId) {
             const fullBox = document.getElementById(`full-${postId}`);
-            const snippetBox = document.getElementById(`snippet-${postId}`);
+            const bodyBox = document.getElementById(`full-body-${postId}`);
             const toggleBtn = document.getElementById(`toggleBtn-${postId}`);
+            const cardEl = document.getElementById(`card-${postId}`);
 
-            if (!fullBox) return;
+            if (!fullBox || !bodyBox) return;
 
-            if (fullBox.classList.contains('hidden')) {
-                fullBox.classList.remove('hidden');
-                if (snippetBox) snippetBox.classList.add('hidden');
-                if (toggleBtn) toggleBtn.innerText = '본문 접기 ▲';
-            } else {
+            // 이미 펼쳐져 있으면 닫기
+            if (!fullBox.classList.contains('hidden')) {
                 fullBox.classList.add('hidden');
-                if (snippetBox) snippetBox.classList.remove('hidden');
                 if (toggleBtn) toggleBtn.innerText = '본문 보기 ▼';
+                return;
+            }
+
+            // 이미 한 번 로드된 본문이면 즉시 펼치기
+            if (fullBox.dataset.loaded === 'true') {
+                fullBox.classList.remove('hidden');
+                if (toggleBtn) toggleBtn.innerText = '본문 접기 ▲';
+                return;
+            }
+
+            if (fullBox.dataset.loading === 'true') return;
+            fullBox.dataset.loading = 'true';
+            if (toggleBtn) {
+                toggleBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>원문 확인 중...';
+            }
+
+            try {
+                const params = new URLSearchParams({
+                    q: currentParams.q || '',
+                    sub_q: currentParams.sub_q || ''
+                });
+                const resp = await fetch(`/api/post/${postId}/content?${params.toString()}`);
+                const data = await resp.json();
+
+                if (data.status === 'deleted') {
+                    if (cardEl) {
+                        cardEl.className = "bg-rose-50/80 rounded-2xl border border-rose-200 p-4 text-center transition-all duration-500";
+                        cardEl.innerHTML = `
+                            <div class="text-xs sm:text-sm font-bold text-rose-700 flex items-center justify-center gap-1.5">
+                                <i class="fa-regular fa-trash-can"></i>
+                                <span>삭제된 게시글입니다.</span>
+                            </div>
+                            <div class="text-[11px] text-rose-500 mt-0.5">디시인사이드 원본 글 삭제가 확인되어 일반 목록에서 제외되었습니다.</div>
+                        `;
+                        setTimeout(() => {
+                            cardEl.style.opacity = '0';
+                            setTimeout(() => cardEl.remove(), 400);
+                        }, 1300);
+                    }
+                    return;
+                }
+
+                if (resp.ok && data.status === 'ok') {
+                    if (data.has_content && data.full_content) {
+                        bodyBox.innerHTML = data.full_content;
+                        bodyBox.className = "mb-3 break-keep";
+                    } else {
+                        bodyBox.innerHTML = "(본문 텍스트가 없거나 이미지 전용 글입니다)";
+                        bodyBox.className = "text-slate-400 italic mb-3";
+                    }
+                    fullBox.dataset.loaded = 'true';
+                    fullBox.classList.remove('hidden');
+                    if (toggleBtn) toggleBtn.innerText = '본문 접기 ▲';
+                } else {
+                    if (toggleBtn) toggleBtn.innerText = '본문 보기 ▼';
+                    alert(data.message || '본문을 불러오지 못했습니다.');
+                }
+            } catch (err) {
+                console.error("본문 조회 실패:", err);
+                if (toggleBtn) toggleBtn.innerText = '본문 보기 ▼';
+            } finally {
+                fullBox.dataset.loading = 'false';
             }
         }
 
@@ -597,13 +641,8 @@
                     </a>
                 </div>
 
-                ${item.content_snippet ? `
-                <div id="snippet-${item.post_id}" onclick="togglePostContent('${item.post_id}')" class="cursor-pointer text-xs sm:text-sm text-slate-600 leading-relaxed mb-2.5 line-clamp-2 hover:text-slate-900 transition break-keep break-words">
-                    ${item.content_snippet}
-                </div>` : ''}
-
-                <div id="full-${item.post_id}" class="hidden my-2.5 p-3 sm:p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 leading-relaxed max-h-[500px] overflow-y-auto post-content">
-                    ${item.has_content ? `<div class="mb-3 break-keep">${item.full_content}</div>` : '<div class="text-slate-400 italic mb-3">(본문 텍스트가 없거나 이미지 전용 글입니다)</div>'}
+                <div id="full-${item.post_id}" data-loaded="false" class="hidden my-2.5 p-3 sm:p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 leading-relaxed max-h-[500px] overflow-y-auto post-content">
+                    <div id="full-body-${item.post_id}" class="mb-3 break-keep"></div>
                     <div class="flex justify-between items-center pt-2 border-t border-slate-200/60 text-xs">
                         <a href="${item.url}" target="_blank" class="text-indigo-600 font-semibold hover:underline flex items-center gap-1">
                             <span>디시인사이드 원본 글 보기</span>

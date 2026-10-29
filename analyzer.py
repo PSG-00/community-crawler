@@ -29,6 +29,7 @@ class TopicAnalyzer:
                    COALESCE(NULLIF(author_code, ''), NULLIF(nickname, ''), 'anon_' || post_id::text) AS author_key
             FROM dc_posts
             WHERE gallery_id = %s
+              AND is_deleted = FALSE
               AND created_at >= %s
               AND created_at < %s
             ORDER BY created_at ASC

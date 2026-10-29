@@ -53,6 +53,13 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_posts_created_at ON dc_posts (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_gallery ON dc_posts (gallery_id);
 
+    -- 잊힐 권리 보호 및 삭제된 게시글 아카이브 분리용 컬럼/인덱스
+    ALTER TABLE dc_posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE dc_posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITHOUT TIME ZONE;
+    ALTER TABLE dc_posts ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMP WITHOUT TIME ZONE;
+    CREATE INDEX IF NOT EXISTS idx_posts_is_deleted ON dc_posts (is_deleted);
+    CREATE INDEX IF NOT EXISTS idx_posts_deleted_at ON dc_posts (deleted_at DESC) WHERE is_deleted = TRUE;
+
     -- 실시간 갤러리 토픽 타임라인 테이블
     CREATE TABLE IF NOT EXISTS gallery_events (
         event_id SERIAL PRIMARY KEY,

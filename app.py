@@ -3,17 +3,27 @@ import html
 import re
 import json
 import hashlib
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from database import get_db
+from database import get_db, init_db
 from analyzer import TopicAnalyzer
 from notifier import validate_webhook_url, send_test_webhook
 
+try:
+    init_db()
+except Exception as _db_err:
+    print(f"⚠️ DB 스키마 초기화 건너뜀: {_db_err}")
+
 app = FastAPI(title="DC Inside Community 90-Day Archive Search")
 templates = Jinja2Templates(directory="templates")
+
+UA_PC = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+UA_M = 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
 
 ADMIN_PASSWORD = "remine0326"
 ADMIN_TOKEN = hashlib.sha256(f"rescene_admin_{ADMIN_PASSWORD}".encode()).hexdigest()
@@ -23,6 +33,72 @@ def verify_admin(request: Request) -> bool:
     cookie_token = request.cookies.get("admin_auth", "")
     header_pw = request.headers.get("X-Admin-Password", "")
     return cookie_token == ADMIN_TOKEN or header_pw == ADMIN_PASSWORD
+
+
+def check_dc_post_deleted(gallery_id: str, post_id: int, timeout: int = 4) -> Optional[bool]:
+    """
+    디시인사이드 원본 게시글이 현재 삭제되었는지 실시간 확인:
+    - True: 디시인사이드에서 삭제됨 (404 / 410 / 에러 리다이렉트 / 삭제 안내 문구)
+    - False: 디시인사이드에 정상 존재함
+    - None: 일시적 네트워크 타임아웃 또는 판단 불가 (오탐 방지)
+    """
+    url = f"https://gall.dcinside.com/mgallery/board/view/?id={gallery_id}&no={post_id}"
+    req = urllib.request.Request(url, headers={
+        'User-Agent': UA_PC,
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            final_url = resp.geturl() or ""
+            if "error" in final_url or "/board/lists" in final_url:
+                return True
+            chunk = resp.read(16384).decode("utf-8", "ignore")
+            if (
+                "해당 글은 삭제되었습니다" in chunk
+                or "존재하지 않는 게시물입니다" in chunk
+                or "삭제된 게시물입니다" in chunk
+                or " 정상적인 접근이 아닙니다" in chunk
+                or "derror/deleted" in chunk
+            ):
+                return True
+            return False
+    except urllib.error.HTTPError as e:
+        if e.code in (404, 410):
+            return True
+        return None
+    except Exception:
+        return None
+
+
+def fetch_dc_post_content_live(gallery_id: str, post_id: int, timeout: int = 5) -> str:
+    """DB에 본문이 아직 비어있는 과거 백필 글 열람 시 모바일 페이지에서 실시간 본문 보충"""
+    url = f"https://m.dcinside.com/board/{gallery_id}/{post_id}"
+    req = urllib.request.Request(url, headers={
+        'User-Agent': UA_M,
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            h = resp.read().decode("utf-8", "ignore")
+        body_m = re.search(
+            r'<div class="thum-txtin"[^>]*>(.*?)(?:<div class="reco-search"|<div class="comment|<div class="gallview-btn|<div class="user-info|$)',
+            h, re.DOTALL
+        )
+        if not body_m:
+            body_m = re.search(r'<div class="writing_view_box"[^>]*>(.*?)</div>', h, re.DOTALL)
+        if not body_m:
+            return ""
+        raw_html = body_m.group(1)
+        clean = re.sub(r'<script.*?</script>', '', raw_html, flags=re.DOTALL)
+        clean = re.sub(r'<style.*?</style>', '', clean, flags=re.DOTALL)
+        clean = re.sub(r'<br\s*/?>', '\n', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'</?(p|div)[^>]*>', '\n', clean, flags=re.IGNORECASE)
+        text = html.unescape(re.sub(r'<[^>]+>', ' ', clean))
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r'\n\s*\n+', '\n\n', text)
+        return text.strip()
+    except Exception:
+        return ""
 
 
 def build_dot_tolerant_regex(term: str) -> str:
@@ -183,7 +259,8 @@ def execute_search(
         error_msg = "결과 내 검색어는 최소 2글자 이상 입력해야 합니다."
     elif valid_terms or valid_sub_terms or period != "all":
         start_time = time.perf_counter()
-        where_clauses = []
+        # 일반 공개 검색에서는 삭제 처리된 게시글(is_deleted = TRUE)을 원천 제외
+        where_clauses = ["is_deleted = FALSE"]
         params = []
 
         # 시간대 지정 검색(분 단위 범위)이나 오늘(1d) 검색은 스캔 행 수가 적으므로 점 우회 표기(우.리.은.행 등)도 함께 매칭
@@ -236,8 +313,9 @@ def execute_search(
                 cur.execute(f"SELECT COUNT(*) FROM dc_posts {where_sql}", params)
                 total_count = cur.fetchone()[0]
 
+                # 목록 조회 시에는 본문(content)을 반환하지 않고 제목과 메타데이터만 조회 (잊힐 권리 보호)
                 query = f"""
-                    SELECT post_id, gallery_id, title, content, nickname, author_code, created_at
+                    SELECT post_id, gallery_id, title, nickname, author_code, created_at
                     FROM dc_posts
                     {where_sql}
                     ORDER BY post_id DESC
@@ -256,15 +334,11 @@ def execute_search(
             highlight_list.extend(valid_sub_terms)
 
         for r in rows:
-            p_id, gall, title, content, nick, code, dt = r
-            raw_content = "" if (not content or content.strip() == "__EMPTY__") else content
+            p_id, gall, title, nick, code, dt = r
             results.append({
                 "post_id": p_id,
                 "url": f"https://gall.dcinside.com/mgallery/board/view/?id={gall}&no={p_id}",
                 "title": highlight_keywords_in_text(title, highlight_list),
-                "content_snippet": generate_snippet(raw_content, highlight_list),
-                "full_content": highlight_keywords_in_text(raw_content, highlight_list),
-                "has_content": bool(raw_content.strip()),
                 "nickname": highlight_keywords_in_text(nick, valid_terms if target == "nickname" else []),
                 "author_code": code,
                 "created_at": dt.strftime("%Y-%m-%d %H:%M")
@@ -361,7 +435,7 @@ def index(
 
     with get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM dc_posts")
+            cur.execute("SELECT COUNT(*) FROM dc_posts WHERE is_deleted = FALSE")
             db_total_posts = cur.fetchone()[0]
 
     recent_topics = get_recent_topics(limit=24)
@@ -411,6 +485,90 @@ def api_search(
         period=period, start_date=start_date, end_date=end_date, page=page
     )
 
+
+@app.get("/api/post/{post_id}/content")
+def api_get_post_content(
+    post_id: int,
+    q: Optional[str] = Query(None),
+    sub_q: Optional[str] = Query(None)
+):
+    """
+    본문 보기 요청 시 온디맨드로 디시인사이드 원본 삭제 여부를 실시간 검증:
+    - 디시인사이드에서 삭제된 글이면 is_deleted=TRUE로 마킹하고 일반 뷰에서 즉시 삭제/차단(관리자 보관소로 이동)
+    - 정상 존재하는 글이면 본문(검색어 하이라이트 포함)을 반환
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT post_id, gallery_id, title, content, is_deleted, last_checked_at
+                FROM dc_posts
+                WHERE post_id = %s
+            """, (post_id,))
+            row = cur.fetchone()
+
+    if not row or row[4]:
+        return {
+            "status": "deleted",
+            "post_id": post_id,
+            "message": "디시인사이드에서 삭제된 게시글입니다."
+        }
+
+    p_id, gall, title, content, is_del, last_checked = row
+    now_naive = datetime.now(KST).replace(tzinfo=None)
+
+    # 최근 3분 이내에 이미 생존 확인된 글이 아니라면 디시인사이드에 실시간 확인
+    need_live_check = True
+    if last_checked and abs((now_naive - last_checked).total_seconds()) < 180:
+        need_live_check = False
+
+    if need_live_check:
+        dc_deleted = check_dc_post_deleted(gall, p_id)
+        if dc_deleted is True:
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE dc_posts
+                        SET is_deleted = TRUE,
+                            deleted_at = NOW(),
+                            last_checked_at = NOW()
+                        WHERE post_id = %s
+                    """, (p_id,))
+                conn.commit()
+            return {
+                "status": "deleted",
+                "post_id": p_id,
+                "message": "디시인사이드에서 삭제된 게시글입니다. (목록에서 제외 처리됩니다)"
+            }
+        elif dc_deleted is False:
+            # 원문이 살아있는데 DB에 본문이 비어있는 과거 백필 글이라면 즉시 보충
+            if not content or content.strip() in ("", "__EMPTY__"):
+                fetched_body = fetch_dc_post_content_live(gall, p_id)
+                if fetched_body:
+                    content = fetched_body
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE dc_posts
+                        SET content = %s,
+                            last_checked_at = NOW()
+                        WHERE post_id = %s
+                    """, (content, p_id))
+                conn.commit()
+
+    raw_content = "" if (not content or content.strip() == "__EMPTY__") else content
+    terms1, _ = parse_search_terms(q or "")
+    terms2, _ = parse_search_terms(sub_q or "")
+    highlight_kws = [t for t in (terms1 + terms2) if len(t) >= 2]
+
+    return {
+        "status": "ok",
+        "post_id": p_id,
+        "url": f"https://gall.dcinside.com/mgallery/board/view/?id={gall}&no={p_id}",
+        "has_content": bool(raw_content.strip()),
+        "full_content": highlight_keywords_in_text(raw_content, highlight_kws)
+    }
+
+
 @app.get("/api/stats")
 def stats():
     with get_db() as conn:
@@ -418,6 +576,7 @@ def stats():
             cur.execute("""
                 SELECT COUNT(*), MIN(created_at), MAX(created_at) 
                 FROM dc_posts
+                WHERE is_deleted = FALSE
             """)
             cnt, min_dt, max_dt = cur.fetchone()
     return {
@@ -514,6 +673,8 @@ def admin_get_notes(request: Request):
                     "is_manual": bool(r[10]),
                     "updated_at": r[11].strftime("%m/%d %H:%M") if r[11] else "",
                 })
+            cur.execute("SELECT COUNT(*) FROM dc_posts WHERE is_deleted = TRUE")
+            counts["deleted_posts"] = cur.fetchone()[0]
     return {"notes": notes, "counts": counts, "recent_topics": get_recent_topics(25)}
 
 
@@ -943,6 +1104,152 @@ async def admin_test_webhook(request: Request):
             conn.commit()
         return {"success": True, "message": "테스트 알림을 성공적으로 발송했습니다."}
     return JSONResponse({"success": False, "message": msg}, status_code=400)
+
+
+# ==================== 관리자 삭제글 증거 보관함 (Deleted Posts Archive) ====================
+
+@app.get("/api/admin/deleted-posts")
+def admin_get_deleted_posts(
+    request: Request,
+    q: Optional[str] = Query(None),
+    target: str = Query("all"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(30, ge=1, le=100)
+):
+    """관리자 전용: 디시인사이드에서 삭제 감지되거나 숨김 처리된 게시글 원문 증거 보관함 조회"""
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+
+    keyword = (q or "").strip()
+    offset = (page - 1) * page_size
+    where_clauses = ["is_deleted = TRUE"]
+    params = []
+
+    if keyword:
+        if keyword.isdigit() and target in ("all", "post_id"):
+            where_clauses.append("(post_id = %s OR title ILIKE %s OR content ILIKE %s OR nickname ILIKE %s OR author_code = %s)")
+            params.extend([int(keyword), f"%{keyword}%", f"%{keyword}%", f"%{keyword}%", keyword])
+        else:
+            terms, op = parse_search_terms(keyword)
+            valid_terms = [t for t in terms if len(t) >= 1]
+            if valid_terms:
+                cond, p = build_search_filter(valid_terms, op, target, dot_tolerant=True)
+                if cond:
+                    where_clauses.append(cond)
+                    params.extend(p)
+
+    where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM dc_posts {where_sql}", params)
+            total_count = cur.fetchone()[0]
+
+            cur.execute(f"""
+                SELECT post_id, gallery_id, title, content, nickname, author_code, created_at, deleted_at
+                FROM dc_posts
+                {where_sql}
+                ORDER BY COALESCE(deleted_at, created_at) DESC, post_id DESC
+                LIMIT %s OFFSET %s
+            """, params + [page_size, offset])
+            rows = cur.fetchall()
+
+    terms, _ = parse_search_terms(keyword) if keyword else ([], "AND")
+    highlight_kws = [t for t in terms if len(t) >= 2]
+
+    items = []
+    for r in rows:
+        p_id, gall, title, content, nick, code, created_dt, deleted_dt = r
+        raw_content = "" if (not content or content.strip() == "__EMPTY__") else content
+        items.append({
+            "post_id": p_id,
+            "url": f"https://gall.dcinside.com/mgallery/board/view/?id={gall}&no={p_id}",
+            "title": highlight_keywords_in_text(title, highlight_kws),
+            "raw_title": title,
+            "full_content": highlight_keywords_in_text(raw_content, highlight_kws),
+            "has_content": bool(raw_content.strip()),
+            "nickname": nick or "ㅇㅇ",
+            "author_code": code or "",
+            "created_at": created_dt.strftime("%Y-%m-%d %H:%M:%S") if created_dt else "",
+            "deleted_at": deleted_dt.strftime("%Y-%m-%d %H:%M:%S") if deleted_dt else "수동/감지됨",
+        })
+
+    return {
+        "results": items,
+        "total_count": total_count,
+        "page": page,
+        "has_next": (offset + page_size) < total_count
+    }
+
+
+@app.post("/api/admin/deleted-posts/mark")
+async def admin_mark_post_deleted(request: Request):
+    """관리자 전용: 특정 글 번호(post_id)를 즉시 삭제 보관함으로 이동(블라인드)하거나 디시 삭제 여부 실시간 점검"""
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    raw_id = str(body.get("post_id") or "").strip()
+    mode = (body.get("mode") or "force").strip()  # 'force' (즉시 보관함 이동) or 'check' (디시 확인 후 삭제시 이동)
+
+    if not raw_id.isdigit():
+        return JSONResponse({"success": False, "message": "올바른 게시글 번호(숫자)를 입력해 주세요."}, status_code=400)
+
+    pid = int(raw_id)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT post_id, gallery_id, title, is_deleted FROM dc_posts WHERE post_id = %s", (pid,))
+            row = cur.fetchone()
+            if not row:
+                return JSONResponse({"success": False, "message": f"DB에 #{pid}번 게시글이 존재하지 않습니다."}, status_code=404)
+
+            _, gall, title, already_del = row
+            if already_del:
+                return {"success": True, "already_deleted": True, "message": f"#{pid}번 글은 이미 삭제글 보관함에 있습니다."}
+
+            if mode == "check":
+                dc_del = check_dc_post_deleted(gall, pid)
+                if dc_del is False:
+                    return {"success": False, "alive": True, "message": f"#{pid}번 글은 현재 디시인사이드에 정상 존재합니다."}
+                elif dc_del is None:
+                    return {"success": False, "message": "디시인사이드 서버 응답 지연으로 확인하지 못했습니다."}
+
+            cur.execute("""
+                UPDATE dc_posts
+                SET is_deleted = TRUE,
+                    deleted_at = NOW(),
+                    last_checked_at = NOW()
+                WHERE post_id = %s
+            """, (pid,))
+        conn.commit()
+
+    return {
+        "success": True,
+        "post_id": pid,
+        "message": f"#{pid} ('{title[:20]}') 게시글을 일반 뷰에서 숨기고 삭제글 보관함으로 이동했습니다."
+    }
+
+
+@app.post("/api/admin/deleted-posts/restore")
+async def admin_restore_deleted_post(request: Request):
+    """관리자 전용: 삭제글 보관함에 있는 게시글을 일반 검색 목록으로 복구"""
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+    body = await request.json()
+    pid = body.get("post_id")
+    if not pid:
+        return JSONResponse({"success": False, "message": "post_id가 필요합니다."}, status_code=400)
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE dc_posts
+                SET is_deleted = FALSE,
+                    deleted_at = NULL
+                WHERE post_id = %s
+            """, (int(pid),))
+        conn.commit()
+    return {"success": True, "message": f"#{pid}번 게시글을 일반 검색 목록으로 복구했습니다."}
+
 
 
 

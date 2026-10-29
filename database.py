@@ -118,7 +118,7 @@ def init_db():
     SET deleted_at = deleted_at + INTERVAL '9 hours'
     WHERE is_deleted = TRUE
       AND deleted_at IS NOT NULL
-      AND deleted_at < NOW() - INTERVAL '4 hours';
+      AND deleted_at < (NOW() AT TIME ZONE 'Asia/Seoul') - INTERVAL '4 hours';
     """
     with get_db() as conn:
         with conn.cursor() as cur:

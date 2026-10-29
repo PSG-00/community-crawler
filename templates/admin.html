@@ -151,8 +151,8 @@
         </div>
 
         <!-- 4. 메인 탭 전환 (학습 노트 목록 vs 현재 감지된 토픽 관리 vs 식별코드 작성 랭킹) -->
-        <div class="flex items-center justify-between border-b border-slate-200 mb-4 gap-2">
-            <div class="flex gap-1 overflow-x-auto no-scrollbar max-w-full pb-0.5">
+        <div class="border-b border-slate-200 mb-3">
+            <div class="flex gap-1 overflow-x-auto no-scrollbar max-w-full">
                 <button type="button" id="adminTabNotes" onclick="switchAdminTab('notes')"
                         class="px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0">
                     <i class="fa-solid fa-book"></i>
@@ -180,16 +180,18 @@
                     <span id="deletedCountBadge" class="bg-rose-100 text-rose-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">0</span>
                 </button>
             </div>
-            <!-- 카테고리 필터 칩 -->
-            <div id="noteFilterBar" class="flex flex-wrap gap-1 py-1">
-                <button type="button" onclick="setNoteFilter('all')" data-filter="all" class="note-filter-btn bg-slate-800 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg cursor-pointer">전체</button>
-                <button type="button" onclick="setNoteFilter('signature_phrase')" data-filter="signature_phrase" class="note-filter-btn bg-slate-100 text-slate-600 hover:bg-slate-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">✂️ 복붙 꼬리말</button>
-                <button type="button" onclick="setNoteFilter('routine_word')" data-filter="routine_word" class="note-filter-btn bg-slate-100 text-slate-600 hover:bg-slate-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">🔁 24h 상시어</button>
-                <button type="button" onclick="setNoteFilter('ritual_word')" data-filter="ritual_word" class="note-filter-btn bg-slate-100 text-slate-600 hover:bg-slate-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">⏰ 루틴·인증어</button>
-                <button type="button" onclick="setNoteFilter('manual_stop')" data-filter="manual_stop" class="note-filter-btn bg-slate-100 text-slate-600 hover:bg-slate-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">🚫 수동 제외</button>
-                <button type="button" onclick="setNoteFilter('protected')" data-filter="protected" class="note-filter-btn bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">🛡️ 보호 단어</button>
-                <button type="button" onclick="setNoteFilter('disabled')" data-filter="disabled" class="note-filter-btn bg-slate-100 text-slate-600 border border-slate-300 text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">⏸️ 임시 해제</button>
-            </div>
+        </div>
+
+        <!-- 카테고리 필터 칩 (탭 바 하단 별도 행 배치로 가로 스크롤 방지) -->
+        <div id="noteFilterBar" class="flex flex-wrap items-center gap-1.5 mb-3.5">
+            <span class="text-xs font-bold text-slate-500 mr-1">분류 필터:</span>
+            <button type="button" onclick="setNoteFilter('all')" data-filter="all" class="note-filter-btn bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer">전체</button>
+            <button type="button" onclick="setNoteFilter('signature_phrase')" data-filter="signature_phrase" class="note-filter-btn bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer">✂️ 복붙 꼬리말</button>
+            <button type="button" onclick="setNoteFilter('routine_word')" data-filter="routine_word" class="note-filter-btn bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer">🔁 24h 상시어</button>
+            <button type="button" onclick="setNoteFilter('ritual_word')" data-filter="ritual_word" class="note-filter-btn bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer">⏰ 루틴·인증어</button>
+            <button type="button" onclick="setNoteFilter('manual_stop')" data-filter="manual_stop" class="note-filter-btn bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer">🚫 수동 제외</button>
+            <button type="button" onclick="setNoteFilter('protected')" data-filter="protected" class="note-filter-btn bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer">🛡️ 보호 단어</button>
+            <button type="button" onclick="setNoteFilter('disabled')" data-filter="disabled" class="note-filter-btn bg-slate-100 text-slate-600 border border-slate-300 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer">⏸️ 임시 해제</button>
         </div>
 
         <!-- 섹션 A: 학습 노트 규칙 리스트 -->

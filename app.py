@@ -529,10 +529,10 @@ def api_get_post_content(
                     cur.execute("""
                         UPDATE dc_posts
                         SET is_deleted = TRUE,
-                            deleted_at = NOW(),
-                            last_checked_at = NOW()
+                            deleted_at = %s,
+                            last_checked_at = %s
                         WHERE post_id = %s
-                    """, (p_id,))
+                    """, (now_naive, now_naive, p_id))
                 conn.commit()
             return {
                 "status": "deleted",
@@ -550,9 +550,9 @@ def api_get_post_content(
                     cur.execute("""
                         UPDATE dc_posts
                         SET content = %s,
-                            last_checked_at = NOW()
+                            last_checked_at = %s
                         WHERE post_id = %s
-                    """, (content, p_id))
+                    """, (content, now_naive, p_id))
                 conn.commit()
 
     raw_content = "" if (not content or content.strip() == "__EMPTY__") else content
@@ -1176,6 +1176,7 @@ def admin_get_deleted_posts(
 
     return {
         "results": items,
+        "posts": items,
         "total_count": total_count,
         "page": page,
         "has_next": (offset + page_size) < total_count
@@ -1213,17 +1214,19 @@ async def admin_mark_post_deleted(request: Request):
                 elif dc_del is None:
                     return {"success": False, "message": "디시인사이드 서버 응답 지연으로 확인하지 못했습니다."}
 
+            now_naive = datetime.now(KST).replace(tzinfo=None)
             cur.execute("""
                 UPDATE dc_posts
                 SET is_deleted = TRUE,
-                    deleted_at = NOW(),
-                    last_checked_at = NOW()
+                    deleted_at = %s,
+                    last_checked_at = %s
                 WHERE post_id = %s
-            """, (pid,))
+            """, (now_naive, now_naive, pid))
         conn.commit()
 
     return {
         "success": True,
+        "is_deleted": True,
         "post_id": pid,
         "message": f"#{pid} ('{title[:20]}') 게시글을 일반 뷰에서 숨기고 삭제글 보관함으로 이동했습니다."
     }

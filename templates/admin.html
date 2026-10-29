@@ -1047,7 +1047,7 @@
                     delBadge.innerText = `${data.total_count}`;
                 }
 
-                const posts = data.posts || [];
+                const posts = data.results || data.posts || [];
                 if (!append && posts.length === 0) {
                     container.innerHTML = `
                         <div class="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center">
@@ -1079,9 +1079,9 @@
                             </div>
                         </div>
                         <div class="text-sm sm:text-base font-extrabold text-slate-900 break-keep">
-                            ${escapeHtml(p.title)}
+                            ${p.title}
                         </div>
-                        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 whitespace-pre-line leading-relaxed max-h-96 overflow-y-auto break-keep">${p.content ? escapeHtml(p.content) : '<span class="text-slate-400 italic">(본문 텍스트가 없거나 이미지 전용 글)</span>'}</div>
+                        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 leading-relaxed max-h-96 overflow-y-auto break-keep">${p.has_content && p.full_content ? p.full_content : '<span class="text-slate-400 italic">(본문 텍스트가 없거나 이미지 전용 글)</span>'}</div>
                     </div>
                 `).join('');
 

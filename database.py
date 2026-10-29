@@ -112,6 +112,13 @@ def init_db():
         last_sent_at TIMESTAMP WITHOUT TIME ZONE
     );
     CREATE INDEX IF NOT EXISTS idx_discord_webhooks_gallery_active ON discord_webhooks (gallery_id, is_active);
+
+    -- UTC NOW()로 기록된 기존 deleted_at 시각을 KST(+9시간)로 보정
+    UPDATE dc_posts
+    SET deleted_at = deleted_at + INTERVAL '9 hours'
+    WHERE is_deleted = TRUE
+      AND deleted_at IS NOT NULL
+      AND deleted_at < NOW() - INTERVAL '4 hours';
     """
     with get_db() as conn:
         with conn.cursor() as cur:

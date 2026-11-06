@@ -17,11 +17,11 @@ jobs:
           sudo timedatectl set-timezone Asia/Seoul || true
           python3 -m venv venv
           ./venv/bin/pip install --upgrade pip
-          ./venv/bin/pip install -r requirements.txt
+          ./venv/bin/pip install -r crawler/requirements.txt
 
       - name: Initialize DB & Indexes
         run: |
-          ./venv/bin/python3 database.py
+          cd crawler && ../venv/bin/python3 database.py
 
       - name: Register & Start Systemd Services
         run: |
@@ -37,7 +37,7 @@ jobs:
 
           [Service]
           User=ubuntu
-          WorkingDirectory=\$WORKDIR
+          WorkingDirectory=\$WORKDIR/crawler
           ExecStart=\$VENV_PYTHON crawler.py
           Restart=always
           RestartSec=10
@@ -57,7 +57,7 @@ jobs:
 
           [Service]
           User=ubuntu
-          WorkingDirectory=\$WORKDIR
+          WorkingDirectory=\$WORKDIR/crawler
           ExecStart=\$VENV_UVICORN app:app --host 0.0.0.0 --port 80
           Restart=always
           RestartSec=5

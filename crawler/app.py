@@ -204,8 +204,8 @@ def build_search_filter(terms: list, op: str, target: str, dot_tolerant: bool = 
             sub_clauses.append("nickname ILIKE %s")
             params.append(pattern)
         elif target == "code":
-            sub_clauses.append("author_code = %s")
-            params.append(term)
+            sub_clauses.append("author_code ILIKE %s")
+            params.append(pattern)
         else: # all: 제목 또는 본문
             if dot_tolerant:
                 sub_clauses.append(
@@ -250,8 +250,8 @@ def execute_search(
     terms, op = parse_search_terms(keyword) if keyword else ([], "AND")
     sub_terms, sub_op = parse_search_terms(sub_keyword) if sub_keyword else ([], "AND")
 
-    valid_terms = [t for t in terms if len(t) >= (1 if target == "code" else 2)]
-    valid_sub_terms = [t for t in sub_terms if len(t) >= (1 if sub_target == "code" else 2)]
+    valid_terms = [t for t in terms if len(t) >= 2]
+    valid_sub_terms = [t for t in sub_terms if len(t) >= 2]
 
     if keyword and not valid_terms:
         error_msg = "기본 검색어는 최소 2글자 이상 입력해야 합니다."
@@ -1147,8 +1147,8 @@ def admin_get_deleted_posts(
 
     if keyword:
         if keyword.isdigit() and target in ("all", "post_id"):
-            where_clauses.append("(post_id = %s OR title ILIKE %s OR content ILIKE %s OR nickname ILIKE %s OR author_code = %s)")
-            params.extend([int(keyword), f"%{keyword}%", f"%{keyword}%", f"%{keyword}%", keyword])
+            where_clauses.append("(post_id = %s OR title ILIKE %s OR content ILIKE %s OR nickname ILIKE %s OR author_code ILIKE %s)")
+            params.extend([int(keyword), f"%{keyword}%", f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
         else:
             terms, op = parse_search_terms(keyword)
             valid_terms = [t for t in terms if len(t) >= 1]

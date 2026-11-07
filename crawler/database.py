@@ -48,6 +48,7 @@ def init_db():
     
     -- 식별코드(ID/IP) 완전 일치 고속 검색용 B-Tree 인덱스
     CREATE INDEX IF NOT EXISTS idx_posts_author_code ON dc_posts (author_code);
+    CREATE INDEX IF NOT EXISTS idx_posts_author_code_bigm ON dc_posts USING gin (author_code gin_bigm_ops);
     
     -- 날짜 정렬 및 60일 롤링 삭제용 B-Tree 인덱스
     CREATE INDEX IF NOT EXISTS idx_posts_created_at ON dc_posts (created_at DESC);

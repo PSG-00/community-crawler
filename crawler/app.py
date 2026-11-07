@@ -939,6 +939,26 @@ def admin_top_authors(request: Request, days: int = Query(0, ge=0, le=90)):
     return {"top_authors": top_authors, "days": days}
 
 
+@app.get("/api/admin/author-code-words")
+def admin_author_code_words(request: Request):
+    """관리자 전용: 저장된 식별코드 중 '영문 단어 + 숫자 4자리' 형식에서 영문 단어 부분만 집계(삭제글 포함)"""
+    if not verify_admin(request):
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT lower(substring(author_code from '^([A-Za-z]+)[0-9]{4}$')) AS word,
+                       COUNT(DISTINCT author_code) AS code_count
+                FROM dc_posts
+                WHERE author_code ~ '^[A-Za-z]+[0-9]{4}$'
+                GROUP BY 1
+                ORDER BY 1
+            """)
+            rows = cur.fetchall()
+    return {"words": [{"word": r[0], "code_count": r[1]} for r in rows], "total": len(rows)}
+
+
 # ==================== Discord Webhook Endpoints ====================
 
 @app.post("/api/discord/subscribe")
